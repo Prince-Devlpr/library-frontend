@@ -1,0 +1,78 @@
+# Backend (maintained in separate repository: https://github.com/Prince-Devlpr/Library-Management-backend)
+backend/
+
+# Instruction & prompt text files
+LMS_Master_Implementation_Prompt*.txt
+*.txt.bak
+
+# Node & dependencies
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+build/
+**/build/
+
+# Local Environment Variables
+.env
+**/.env
+.env.local
+**/.env.local
+.env.*.local
+**/.env.*.local
+!.env.example
+!**/.env.example
+
+# Logs
+logs/
+**/logs/
+*.log
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor & IDE files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+**/.idea/
+*.iml
+**/*.iml
+*.ipr
+**/*.ipr
+*.iws
+**/*.iws
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Flutter / Dart
+.dart_tool/
+**/.dart_tool/
+.flutter-plugins
+**/.flutter-plugins
+.flutter-plugins-dependencies
+**/.flutter-plugins-dependencies
+.pub-cache/
+**/.pub-cache/
+.pub/
+**/.pub/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/ios/Flutter/.last_build_id
+**/coverage/
+**/app.*.symbols
+**/app.*.map.json
