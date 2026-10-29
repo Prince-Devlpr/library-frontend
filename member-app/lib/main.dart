@@ -878,8 +878,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     qrToken: r['qrToken']?.toString() ?? 'res_token',
                     expiryDate: DateTime.tryParse(r['expiryDate']?.toString() ?? '') ?? DateTime.now().add(const Duration(hours: 24)),
                     status: r['status']?.toString() ?? 'ACTIVE',
-                    paymentMethod: r['paymentMethod']?.toString() ?? 'CASH_COUNTER',
-                    paymentStatus: r['paymentStatus']?.toString() ?? 'UNPAID',
+                    paymentMethod: r['paymentMethod']?.toString() ?? (r['razorpayPaymentId'] != null ? 'RAZORPAY' : 'CASH_COUNTER'),
+                    paymentStatus: r['status'] == 'COLLECTED'
+                        ? 'PAID'
+                        : (r['paymentStatus']?.toString() ?? (r['razorpayPaymentId'] != null ? 'PAID' : 'UNPAID')),
                   ),
                 );
               }
@@ -2324,9 +2326,15 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             .toList();
 
     return RefreshIndicator(
-      onRefresh: _fetchCatalog,
+      onRefresh: () async {
+        await Future.wait([
+          _fetchCatalog(),
+          _fetchUserLoansAndReservations(),
+        ]);
+      },
       color: const Color(0xFF2563EB),
       child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
           // Search Banner
@@ -2552,157 +2560,300 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   // TAB 1: 24H RESERVATIONS SCREEN
   // ---------------------------------------------------------
   Widget _buildReservationsScreen() {
-    if (_reservations.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.schedule, size: 54, color: Color(0xFFCBD5E1)),
-            SizedBox(height: 12),
-            Text('No Active Reservations', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-            SizedBox(height: 6),
-            Text('Browse the catalog to reserve titles for physical pickup.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-          ],
-        ),
-      );
-    }
+    final activeReservations = _reservations.where((r) => r.status == 'ACTIVE').toList();
+    final pastReservations = _reservations.where((r) => r.status != 'ACTIVE').toList();
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: _reservations.map((res) {
-        final remaining = res.remainingDuration;
-        final hours = remaining.inHours;
-        final minutes = remaining.inMinutes % 60;
-
-        return Card(
-          margin: const EdgeInsets.only(bottom: 16),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return RefreshIndicator(
+      onRefresh: _fetchUserLoansAndReservations,
+      color: const Color(0xFF2563EB),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (activeReservations.isEmpty && pastReservations.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 60),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('PICKUP RESERVATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
-                          const SizedBox(height: 4),
-                          Text(res.bookTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                          Text('by ${res.author}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFFBEB),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFDE68A)),
-                      ),
-                      child: Text(
-                        '${hours}h ${minutes}m left',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
+                    const Icon(Icons.schedule, size: 54, color: Color(0xFFCBD5E1)),
+                    const SizedBox(height: 12),
+                    const Text('No Active Reservations', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    const SizedBox(height: 6),
+                    const Text('Browse the catalog to reserve titles for physical pickup.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () => setState(() => _currentIndex = 0),
+                      icon: const Icon(Icons.explore, size: 16),
+                      label: const Text('Browse Catalog'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+              ),
+            ),
 
-                // QR Container
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: QrImageView(
-                    data: 'lms:v1:r:${res.qrToken}',
-                    version: QrVersions.auto,
-                    size: 180,
-                    gapless: true,
-                    backgroundColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 14),
+          // ---------------------------------------------------------
+          // ACTIVE 24H PICKUP RESERVATIONS
+          // ---------------------------------------------------------
+          if (activeReservations.isNotEmpty) ...[
+            const Text(
+              'Awaiting Counter Pickup (24h)',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+            ),
+            const SizedBox(height: 10),
+            ...activeReservations.map((res) {
+              final remaining = res.remainingDuration;
+              final hours = remaining.inHours;
+              final minutes = remaining.inMinutes % 60;
 
-                // Fallback Pickup Code
-                Text(
-                  res.pickupCode,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 4,
-                    color: Color(0xFF0284C7),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Present this QR or code at the library counter.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Allocated Book Barcode: ${res.barcode}',
-                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF94A3B8)),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: res.paymentStatus == 'PAID'
-                        ? const Color(0xFFECFDF5)
-                        : const Color(0xFFFFFBEB),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: res.paymentStatus == 'PAID'
-                          ? const Color(0xFFA7F3D0)
-                          : const Color(0xFFFDE68A),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              return Card(
+                margin: const EdgeInsets.only(bottom: 16),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Icon(
-                              res.paymentStatus == 'PAID' ? Icons.check_circle : Icons.storefront,
-                              size: 16,
-                              color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('PICKUP RESERVATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+                                const SizedBox(height: 4),
+                                Text(res.bookTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                Text('by ${res.author}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
+                              ],
                             ),
-                            const SizedBox(width: 8),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFFBEB),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFFDE68A)),
+                            ),
+                            child: Text(
+                              '${hours}h ${minutes}m left',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // QR Container
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: QrImageView(
+                          data: 'lms:v1:r:${res.qrToken}',
+                          version: QrVersions.auto,
+                          size: 180,
+                          gapless: true,
+                          backgroundColor: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Fallback Pickup Code
+                      Text(
+                        res.pickupCode,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 4,
+                          color: Color(0xFF0284C7),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Present this QR or code at the library counter to collect.',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Allocated Book Barcode: ${res.barcode}',
+                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF94A3B8)),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: res.paymentStatus == 'PAID'
+                              ? const Color(0xFFECFDF5)
+                              : const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: res.paymentStatus == 'PAID'
+                                ? const Color(0xFFA7F3D0)
+                                : const Color(0xFFFDE68A),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
                             Expanded(
-                              child: Text(
-                                res.paymentStatus == 'PAID'
-                                    ? 'Deposit: PAID ONLINE (₹${res.depositAmount.toStringAsFixed(2)})'
-                                    : 'Deposit: PAY CASH AT DESK (₹${res.depositAmount.toStringAsFixed(2)})',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    res.paymentStatus == 'PAID' ? Icons.check_circle : Icons.storefront,
+                                    size: 16,
+                                    color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      res.paymentStatus == 'PAID'
+                                          ? 'Holding Deposit: PAID ONLINE (₹20.00)'
+                                          : 'Holding Deposit: PAY CASH AT DESK (₹20.00)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              res.paymentMethod == 'RAZORPAY' ? 'RAZORPAY' : 'CASH',
+                              style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF475569), fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        res.paymentMethod == 'RAZORPAY' ? 'RAZORPAY' : 'CASH',
-                        style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF475569), fontWeight: FontWeight.bold),
-                      ),
                     ],
                   ),
                 ),
-              ],
+              );
+            }),
+          ],
+
+          // ---------------------------------------------------------
+          // COLLECTED / FULFILLED RESERVATIONS HISTORY
+          // ---------------------------------------------------------
+          if (pastReservations.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              activeReservations.isEmpty ? 'Reservation History' : 'Past Reservations',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
             ),
-          ),
-        );
-      }).toList(),
+            const SizedBox(height: 10),
+            ...pastReservations.map((res) {
+              final isCollected = res.status == 'COLLECTED';
+              final isExpired = res.status == 'EXPIRED';
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                color: isCollected ? const Color(0xFFF8FAFC) : const Color(0xFFFFF1F2),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: isCollected ? const Color(0xFFE2E8F0) : const Color(0xFFFECDD3),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isCollected ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: isCollected ? const Color(0xFFA7F3D0) : const Color(0xFFFECACA),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isCollected ? Icons.check_circle : Icons.error_outline,
+                                  size: 13,
+                                  color: isCollected ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isCollected ? 'COLLECTED & ISSUED' : (isExpired ? 'EXPIRED' : res.status),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isCollected ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            res.pickupCode,
+                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        res.bookTitle,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      ),
+                      Text(
+                        'by ${res.author} • Barcode: ${res.barcode}',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                      const SizedBox(height: 8),
+                      if (isCollected) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                '✓ Book collected and issued. Check "Loans & Fines" for return due date.',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF059669), fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () => setState(() => _currentIndex = 3),
+                              icon: const Icon(Icons.arrow_forward, size: 14),
+                              label: const Text('View Loans', style: TextStyle(fontSize: 11)),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else if (isExpired) ...[
+                        const Text(
+                          '24-hour collection deadline passed. Book copy was released back to the library catalog.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFFDC2626)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
     );
   }
 
@@ -2710,10 +2861,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   // TAB 2: DIGITAL MEMBER CARD
   // ---------------------------------------------------------
   Widget _buildDigitalCardScreen() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-        child: Column(
+    return RefreshIndicator(
+      onRefresh: _fetchUserLoansAndReservations,
+      color: const Color(0xFF2563EB),
+      child: Center(
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          child: Column(
           children: [
             Container(
               width: double.infinity,
@@ -2851,8 +3006,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ---------------------------------------------------------
   // TAB 3: MY LOANS & FINES (RAZORPAY INTEGRATED)
@@ -2860,9 +3016,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget _buildLoansAndFinesScreen() {
     final pendingSlips = _cashSlips.where((s) => s.status == 'PENDING').toList();
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
+    return RefreshIndicator(
+      onRefresh: _fetchUserLoansAndReservations,
+      color: const Color(0xFF2563EB),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
         // -----------------------------------------------------
         // ACTIVE LOANS
         // -----------------------------------------------------
@@ -3272,6 +3432,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           }),
         ],
       ],
-    );
-  }
+    ),
+  );
+}
 }
