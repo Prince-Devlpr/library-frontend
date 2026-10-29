@@ -3,6 +3,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'razorpay_checkout.dart';
 
 void main() {
@@ -174,6 +175,7 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
   String _memberId = 'MEM-2026-001';
   String _memberQrToken = 'mem_98a7c2b6f103e5a4';
   String? _accessToken;
+  bool _isCheckingSavedSession = true;
 
   @override
   void initState() {
@@ -183,9 +185,55 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
     if (widget.initialMemberId != null) _memberId = widget.initialMemberId!;
     if (widget.initialMemberQrToken != null) _memberQrToken = widget.initialMemberQrToken!;
     _accessToken = widget.initialAccessToken;
+    _checkPersistedSession();
   }
 
-  void _handleLoginSuccess(String name, String id, String qrToken, [String? token]) {
+  Future<void> _checkPersistedSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final loginTimestamp = prefs.getInt('session_login_timestamp');
+      final token = prefs.getString('session_token');
+      final name = prefs.getString('session_name');
+      final regNo = prefs.getString('session_id');
+      final qrToken = prefs.getString('session_qr_token');
+
+      if (loginTimestamp != null && token != null && token.isNotEmpty) {
+        final loginTime = DateTime.fromMillisecondsSinceEpoch(loginTimestamp);
+        final elapsed = DateTime.now().difference(loginTime);
+        const sevenDays = Duration(days: 7);
+
+        if (elapsed < sevenDays) {
+          // Valid active session within 7 days
+          if (mounted) {
+            setState(() {
+              _memberName = name ?? _memberName;
+              _memberId = regNo ?? _memberId;
+              _memberQrToken = qrToken ?? _memberQrToken;
+              _accessToken = token;
+              _isLoggedIn = true;
+              _isCheckingSavedSession = false;
+            });
+            return;
+          }
+        } else {
+          // Session expired after 7 days - clean session tokens, but keep saved_username and saved_password for autofill
+          await prefs.remove('session_token');
+          await prefs.remove('session_name');
+          await prefs.remove('session_id');
+          await prefs.remove('session_qr_token');
+          await prefs.remove('session_login_timestamp');
+        }
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _isCheckingSavedSession = false;
+      });
+    }
+  }
+
+  Future<void> _handleLoginSuccess(String name, String id, String qrToken, [String? token]) async {
     setState(() {
       _memberName = name;
       _memberId = id;
@@ -193,13 +241,34 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
       _accessToken = token;
       _isLoggedIn = true;
     });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (token != null && token.isNotEmpty) {
+        await prefs.setString('session_token', token);
+      }
+      await prefs.setString('session_name', name);
+      await prefs.setString('session_id', id);
+      await prefs.setString('session_qr_token', qrToken);
+      await prefs.setInt('session_login_timestamp', DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {}
   }
 
-  void _handleLogout() {
+  Future<void> _handleLogout() async {
     setState(() {
       _accessToken = null;
       _isLoggedIn = false;
     });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('session_token');
+      await prefs.remove('session_name');
+      await prefs.remove('session_id');
+      await prefs.remove('session_qr_token');
+      await prefs.remove('session_login_timestamp');
+      // Notice: saved_username and saved_password are intentionally kept for autofill
+    } catch (_) {}
   }
 
   @override
@@ -234,17 +303,24 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
         ),
         dividerColor: const Color(0xFFE2E8F0),
       ),
-      home: _isLoggedIn
-          ? MainNavigationScreen(
-              memberName: _memberName,
-              memberId: _memberId,
-              memberQrToken: _memberQrToken,
-              accessToken: _accessToken,
-              onLogout: _handleLogout,
+      home: _isCheckingSavedSession && !_isLoggedIn
+          ? const Scaffold(
+              backgroundColor: Color(0xFFF8FAFC),
+              body: Center(
+                child: CircularProgressIndicator(color: Color(0xFF2563EB)),
+              ),
             )
-          : MemberLoginScreen(
-              onLoginSuccess: _handleLoginSuccess,
-            ),
+          : _isLoggedIn
+              ? MainNavigationScreen(
+                  memberName: _memberName,
+                  memberId: _memberId,
+                  memberQrToken: _memberQrToken,
+                  accessToken: _accessToken,
+                  onLogout: _handleLogout,
+                )
+              : MemberLoginScreen(
+                  onLoginSuccess: _handleLoginSuccess,
+                ),
     );
   }
 }
@@ -266,13 +342,50 @@ class MemberLoginScreen extends StatefulWidget {
 }
 
 class _MemberLoginScreenState extends State<MemberLoginScreen> {
-  final TextEditingController _identifierController = TextEditingController(text: 'member@library.com');
-  final TextEditingController _passwordController = TextEditingController(text: 'UserPassword123!');
+  final TextEditingController _identifierController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _rememberMe = true;
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;
 
   static const String backendApiBaseUrl = 'https://library-management-backend-cr47.onrender.com/api/v1';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRememberedCredentials();
+  }
+
+  Future<void> _loadRememberedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedUser = prefs.getString('saved_username');
+      final savedPass = prefs.getString('saved_password');
+      final remember = prefs.getBool('remember_credentials') ?? true;
+
+      if (mounted) {
+        setState(() {
+          _rememberMe = remember;
+          if (savedUser != null && savedUser.isNotEmpty) {
+            _identifierController.text = savedUser;
+          } else {
+            _identifierController.text = 'member@library.com';
+          }
+          if (savedPass != null && savedPass.isNotEmpty) {
+            _passwordController.text = savedPass;
+          } else {
+            _passwordController.text = 'UserPassword123!';
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        _identifierController.text = 'member@library.com';
+        _passwordController.text = 'UserPassword123!';
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -316,6 +429,20 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
           final regNo = userData['registrationNumber']?.toString() ?? identifier;
           final qrToken = userData['cardQrToken']?.toString() ?? 'mem_98a7c2b6f103e5a4';
 
+          // Save or clear auto-fill credentials based on rememberMe toggle
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            if (_rememberMe) {
+              await prefs.setString('saved_username', identifier);
+              await prefs.setString('saved_password', password);
+              await prefs.setBool('remember_credentials', true);
+            } else {
+              await prefs.remove('saved_username');
+              await prefs.remove('saved_password');
+              await prefs.setBool('remember_credentials', false);
+            }
+          } catch (_) {}
+
           widget.onLoginSuccess(name, regNo, qrToken, accessToken);
           return;
         }
@@ -339,7 +466,7 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
       return;
     } catch (e) {
       setState(() {
-        _errorMessage = 'Unable to connect to library server. You can tap "Offline Demo Mode" below to test offline.';
+        _errorMessage = 'Unable to connect to library server. Please check your network connection and retry.';
       });
     } finally {
       if (mounted) {
@@ -348,23 +475,6 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
         });
       }
     }
-  }
-
-  void _useOfflineDemo() {
-    final identifier = _identifierController.text.trim();
-    if (identifier.toLowerCase().contains('alice') || identifier.contains('1001')) {
-      widget.onLoginSuccess('Alice Johnson', 'USR-1001', 'mem_alice_johnson_token', null);
-    } else {
-      widget.onLoginSuccess('Alex Rivera', 'MEM-2026-001', 'mem_98a7c2b6f103e5a4', null);
-    }
-  }
-
-  void _prefillDemo(String id, String pw) {
-    setState(() {
-      _identifierController.text = id;
-      _passwordController.text = pw;
-      _errorMessage = null;
-    });
   }
 
   @override
@@ -514,7 +624,59 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 12),
+
+                  // Auto-fill & 7-Day Session Indicators
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      InkWell(
+                        onTap: () => setState(() => _rememberMe = !_rememberMe),
+                        borderRadius: BorderRadius.circular(4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: Checkbox(
+                                value: _rememberMe,
+                                activeColor: const Color(0xFF2563EB),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                onChanged: (val) => setState(() => _rememberMe = val ?? true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Auto-fill credentials',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF475569), fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.shield_outlined, size: 12, color: Color(0xFF2563EB)),
+                            SizedBox(width: 4),
+                            Text(
+                              '7-Day Session',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
 
                   // Submit Button
                   ElevatedButton(
@@ -544,92 +706,6 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
                               ],
                             ),
                           ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Quick Demo Sign-In
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.verified_user, size: 14, color: Color(0xFF2563EB)),
-                            SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'QUICK DEMO PATRON ACCOUNTS',
-                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B), letterSpacing: 0.2),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                  backgroundColor: Colors.white,
-                                ),
-                                onPressed: () {
-                                  _prefillDemo('member@library.com', 'UserPassword123!');
-                                  _handleLogin();
-                                },
-                                child: const Column(
-                                  children: [
-                                    Text('Alex Rivera', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                                    Text('MEM-2026-001', style: TextStyle(fontSize: 10, color: Color(0xFF64748B))),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                  backgroundColor: Colors.white,
-                                ),
-                                onPressed: () {
-                                  _prefillDemo('alice@library.com', 'UserPassword123!');
-                                  _handleLogin();
-                                },
-                                child: const Column(
-                                  children: [
-                                    Text('Alice Johnson', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                                    Text('USR-1001', style: TextStyle(fontSize: 10, color: Color(0xFF64748B))),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Center(
-                          child: TextButton.icon(
-                            onPressed: _useOfflineDemo,
-                            icon: const Icon(Icons.offline_bolt_outlined, size: 16, color: Color(0xFF64748B)),
-                            label: const Text(
-                              'Test in Offline Demo Mode',
-                              style: TextStyle(fontSize: 12, color: Color(0xFF64748B), decoration: TextDecoration.underline),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ],
               ),
