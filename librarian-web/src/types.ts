@@ -23,6 +23,7 @@ export interface Book {
   category: string;
   publicationYear: number;
   description?: string;
+  price?: number;
   coverUrl?: string;
   copies?: BookCopy[];
   totalCopies?: number;

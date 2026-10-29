@@ -38,6 +38,32 @@ export const api = {
     return json.data;
   },
 
+  async updateBook(bookId: string, data: Partial<Book>): Promise<Book> {
+    const res = await fetch(`${API_BASE_URL}/books/${bookId}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.error?.message || 'Failed to update book on backend');
+    }
+    return json.data;
+  },
+
+  async uploadImage(base64DataUri: string): Promise<{ url: string; publicId?: string | null }> {
+    const res = await fetch(`${API_BASE_URL}/uploads/image`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ image: base64DataUri }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.error?.message || 'Failed to upload photo to server');
+    }
+    return json.data;
+  },
+
   async addCopies(bookId: string, count: number, shelfLocation: string): Promise<BookCopy[]> {
     const newCopies: BookCopy[] = [];
     for (let i = 0; i < count; i++) {

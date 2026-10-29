@@ -1,16 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../api';
 import type { Book, BookCopy } from '../types';
-import { Plus, Search, QrCode, Printer, Layers, Image as ImageIcon } from 'lucide-react';
+import { Plus, Search, QrCode, Printer, Layers, Image as ImageIcon, Edit3, Upload, Tag } from 'lucide-react';
 
 export const CatalogManager: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Modals
   const [showAddBookModal, setShowAddBookModal] = useState(false);
+  const [showEditBookModal, setShowEditBookModal] = useState<Book | null>(null);
   const [showAddCopiesModal, setShowAddCopiesModal] = useState<Book | null>(null);
   const [showQrModal, setShowQrModal] = useState<{ copy: BookCopy; book: Book; svg: string } | null>(null);
+
+  // File Input Refs
+  const addFileInputRef = useRef<HTMLInputElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
 
   // New Book Form State
   const [newBook, setNewBook] = useState({
@@ -20,6 +29,20 @@ export const CatalogManager: React.FC = () => {
     publisher: '',
     category: 'Computer Science',
     publicationYear: 2026,
+    price: 499.00,
+    coverUrl: '',
+    description: '',
+  });
+
+  // Edit Book Form State
+  const [editForm, setEditForm] = useState({
+    title: '',
+    author: '',
+    isbn: '',
+    publisher: '',
+    category: 'Computer Science',
+    publicationYear: 2026,
+    price: 499.00,
     coverUrl: '',
     description: '',
   });
@@ -29,11 +52,16 @@ export const CatalogManager: React.FC = () => {
   const [shelfLocation, setShelfLocation] = useState('CS-A1-01');
 
   const loadBooks = async (query?: string) => {
+    setIsLoading(true);
+    setErrorMessage(null);
     try {
       const data = await api.getBooks(query);
       setBooks(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to load catalog');
       setBooks([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -46,38 +74,150 @@ export const CatalogManager: React.FC = () => {
     loadBooks(searchTerm);
   };
 
+  // File Picker & Upload Handler
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>, isEditing = false) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate size (max 8MB)
+    if (file.size > 8 * 1024 * 1024) {
+      alert('Selected image exceeds 8MB size limit. Please choose a smaller photo.');
+      return;
+    }
+
+    setIsUploading(true);
+    setErrorMessage(null);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64Data = reader.result as string;
+        // Upload to backend Cloudinary/storage
+        const res = await api.uploadImage(base64Data);
+        const finalUrl = res.url || base64Data;
+
+        if (isEditing) {
+          setEditForm((prev) => ({ ...prev, coverUrl: finalUrl }));
+        } else {
+          setNewBook((prev) => ({ ...prev, coverUrl: finalUrl }));
+        }
+        setSuccessMessage('Photo uploaded successfully!');
+        setTimeout(() => setSuccessMessage(null), 3000);
+      } catch (err: any) {
+        // Fallback to local base64 data URI so user is not blocked
+        const base64Data = reader.result as string;
+        if (isEditing) {
+          setEditForm((prev) => ({ ...prev, coverUrl: base64Data }));
+        } else {
+          setNewBook((prev) => ({ ...prev, coverUrl: base64Data }));
+        }
+      } finally {
+        setIsUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.createBook(newBook);
-    setShowAddBookModal(false);
-    setNewBook({
-      title: '',
-      author: '',
-      isbn: '',
-      publisher: '',
-      category: 'Computer Science',
-      publicationYear: 2026,
-      coverUrl: '',
-      description: '',
+    setErrorMessage(null);
+    try {
+      await api.createBook({
+        ...newBook,
+        price: Number(newBook.price) || 499.00,
+        publicationYear: Number(newBook.publicationYear) || 2026,
+      });
+      setShowAddBookModal(false);
+      setNewBook({
+        title: '',
+        author: '',
+        isbn: '',
+        publisher: '',
+        category: 'Computer Science',
+        publicationYear: 2026,
+        price: 499.00,
+        coverUrl: '',
+        description: '',
+      });
+      setSuccessMessage('Book title added to catalog successfully!');
+      setTimeout(() => setSuccessMessage(null), 3000);
+      loadBooks();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to create book title');
+    }
+  };
+
+  const handleOpenEditModal = (book: Book) => {
+    setShowEditBookModal(book);
+    setEditForm({
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn,
+      publisher: book.publisher,
+      category: book.category,
+      publicationYear: book.publicationYear,
+      price: book.price !== undefined ? Number(book.price) : 499.00,
+      coverUrl: book.coverUrl || '',
+      description: book.description || '',
     });
-    loadBooks();
+  };
+
+  const handleSaveEditBook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!showEditBookModal) return;
+    setErrorMessage(null);
+    try {
+      await api.updateBook(showEditBookModal.id, {
+        ...editForm,
+        price: Number(editForm.price) || 499.00,
+        publicationYear: Number(editForm.publicationYear) || 2026,
+      });
+      setShowEditBookModal(null);
+      setSuccessMessage(`Updated details for "${editForm.title}"!`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+      loadBooks();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to update book details');
+    }
   };
 
   const handleAddCopies = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!showAddCopiesModal) return;
-    await api.addCopies(showAddCopiesModal.id, copyCount, shelfLocation);
-    setShowAddCopiesModal(null);
-    loadBooks();
+    try {
+      await api.addCopies(showAddCopiesModal.id, copyCount, shelfLocation);
+      setShowAddCopiesModal(null);
+      setSuccessMessage(`Added ${copyCount} copies for ${showAddCopiesModal.title}`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+      loadBooks();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to add copies');
+    }
   };
 
   const handleOpenQrModal = async (copy: BookCopy, book: Book) => {
-    const data = await api.getCopyQr(copy.barcode);
-    setShowQrModal({ copy, book, svg: data.qr.svg });
+    try {
+      const data = await api.getCopyQr(copy.barcode);
+      setShowQrModal({ copy, book, svg: data.qr.svg });
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to load QR code');
+    }
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* Notifications */}
+      {errorMessage && (
+        <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#b91c1c', fontSize: '0.875rem' }}>
+          {errorMessage}
+        </div>
+      )}
+      {successMessage && (
+        <div style={{ padding: '12px 16px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', color: '#047857', fontSize: '0.875rem' }}>
+          {successMessage}
+        </div>
+      )}
+
       {/* Search & Actions Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
         <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '500px' }}>
@@ -108,6 +248,12 @@ export const CatalogManager: React.FC = () => {
         </button>
       </div>
 
+      {isLoading && books.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
+          Loading library catalog...
+        </div>
+      )}
+
       {/* Book Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
         {books.map((book) => (
@@ -125,7 +271,27 @@ export const CatalogManager: React.FC = () => {
                 </div>
               )}
               <div style={{ flex: 1 }}>
-                <span className="badge badge-borrowed" style={{ marginBottom: '6px' }}>{book.category}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px', marginBottom: '6px' }}>
+                  <span className="badge badge-borrowed">{book.category}</span>
+                  {/* Price Tag Badge */}
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: '#fef3c7',
+                      color: '#92400e',
+                      border: '1px solid #fde68a',
+                      borderRadius: '6px',
+                      padding: '2px 8px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <Tag size={12} />
+                    ₹{book.price !== undefined ? Number(book.price).toFixed(0) : '499'}
+                  </span>
+                </div>
                 <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '4px' }}>{book.title}</h4>
                 <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>by {book.author}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>ISBN: {book.isbn}</div>
@@ -171,14 +337,22 @@ export const CatalogManager: React.FC = () => {
               </div>
             )}
 
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
+            {/* Actions: Edit Details and Add Copies */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '8px' }}>
+              <button
+                onClick={() => handleOpenEditModal(book)}
+                className="btn btn-secondary"
+                style={{ flex: 1, fontSize: '0.8125rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <Edit3 size={14} />
+                Edit Details
+              </button>
               <button
                 onClick={() => setShowAddCopiesModal(book)}
                 className="btn btn-secondary"
-                style={{ flex: 1, fontSize: '0.8125rem', padding: '8px 12px' }}
+                style={{ flex: 1, fontSize: '0.8125rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                <Layers size={15} />
+                <Layers size={14} />
                 + Add Copies
               </button>
             </div>
@@ -189,7 +363,7 @@ export const CatalogManager: React.FC = () => {
       {/* ADD TITLE MODAL */}
       {showAddBookModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '28px' }}>
+          <div className="modal-content" style={{ padding: '28px', maxWidth: '560px' }}>
             <h3 style={{ marginBottom: '18px' }}>Add New Book to Catalog</h3>
             <form onSubmit={handleCreateBook}>
               <div className="form-group">
@@ -203,6 +377,7 @@ export const CatalogManager: React.FC = () => {
                   className="form-input"
                 />
               </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="form-group">
                   <label className="form-label">Author</label>
@@ -227,6 +402,7 @@ export const CatalogManager: React.FC = () => {
                   />
                 </div>
               </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="form-group">
                   <label className="form-label">Publisher</label>
@@ -244,30 +420,241 @@ export const CatalogManager: React.FC = () => {
                   <input
                     required
                     type="text"
-                    placeholder="e.g. Algorithms & Data Structures"
+                    placeholder="e.g. Computer Science"
                     value={newBook.category}
                     onChange={(e) => setNewBook({ ...newBook, category: e.target.value })}
                     className="form-input"
                   />
                 </div>
               </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group">
+                  <label className="form-label">Price Tag (₹ / INR)</label>
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="e.g. 499.00"
+                    value={newBook.price}
+                    onChange={(e) => setNewBook({ ...newBook, price: parseFloat(e.target.value) || 0 })}
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Publication Year</label>
+                  <input
+                    required
+                    type="number"
+                    value={newBook.publicationYear}
+                    onChange={(e) => setNewBook({ ...newBook, publicationYear: parseInt(e.target.value, 10) || 2026 })}
+                    className="form-input"
+                  />
+                </div>
+              </div>
+
+              {/* Cover Photo Upload from Files or URL */}
               <div className="form-group">
-                <label className="form-label">Book Cover Image URL (Cloudinary or Direct)</label>
+                <label className="form-label">Book Cover Photo</label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    type="file"
+                    ref={addFileInputRef}
+                    accept="image/*"
+                    onChange={(e) => handleFileSelect(e, false)}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addFileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="btn btn-secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Upload size={16} />
+                    {isUploading ? 'Uploading...' : 'Choose from Files'}
+                  </button>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>or paste URL below</span>
+                </div>
+
                 <input
-                  type="url"
-                  placeholder="https://..."
+                  type="text"
+                  placeholder="https://... or auto-filled from photo upload"
                   value={newBook.coverUrl}
                   onChange={(e) => setNewBook({ ...newBook, coverUrl: e.target.value })}
+                  className="form-input"
+                  style={{ marginTop: '8px' }}
+                />
+
+                {newBook.coverUrl && (
+                  <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <img
+                      src={newBook.coverUrl}
+                      alt="Cover Preview"
+                      style={{ width: '50px', height: '70px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                    />
+                    <span style={{ fontSize: '0.75rem', color: '#059669', fontWeight: 600 }}>✓ Cover Photo Attached</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px' }}>
+                <button type="button" onClick={() => setShowAddBookModal(false)} className="btn btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" disabled={isUploading} className="btn btn-primary">
+                  Create Catalog Entry
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT TITLE MODAL */}
+      {showEditBookModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ padding: '28px', maxWidth: '560px' }}>
+            <h3 style={{ marginBottom: '6px' }}>Modify Book Details</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '18px' }}>
+              Update book metadata, price tag, or cover photo. Changes reflect immediately across the mobile app.
+            </p>
+
+            <form onSubmit={handleSaveEditBook}>
+              <div className="form-group">
+                <label className="form-label">Book Title</label>
+                <input
+                  required
+                  type="text"
+                  value={editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                   className="form-input"
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-                <button type="button" onClick={() => setShowAddBookModal(false)} className="btn btn-secondary">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group">
+                  <label className="form-label">Author</label>
+                  <input
+                    required
+                    type="text"
+                    value={editForm.author}
+                    onChange={(e) => setEditForm({ ...editForm, author: e.target.value })}
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">ISBN-13</label>
+                  <input
+                    required
+                    type="text"
+                    value={editForm.isbn}
+                    onChange={(e) => setEditForm({ ...editForm, isbn: e.target.value })}
+                    className="form-input"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group">
+                  <label className="form-label">Publisher</label>
+                  <input
+                    required
+                    type="text"
+                    value={editForm.publisher}
+                    onChange={(e) => setEditForm({ ...editForm, publisher: e.target.value })}
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <input
+                    required
+                    type="text"
+                    value={editForm.category}
+                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                    className="form-input"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group">
+                  <label className="form-label">Price Tag (₹ / INR)</label>
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editForm.price}
+                    onChange={(e) => setEditForm({ ...editForm, price: parseFloat(e.target.value) || 0 })}
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Publication Year</label>
+                  <input
+                    required
+                    type="number"
+                    value={editForm.publicationYear}
+                    onChange={(e) => setEditForm({ ...editForm, publicationYear: parseInt(e.target.value, 10) || 2026 })}
+                    className="form-input"
+                  />
+                </div>
+              </div>
+
+              {/* Cover Photo Upload from Files or URL */}
+              <div className="form-group">
+                <label className="form-label">Book Cover Photo</label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    type="file"
+                    ref={editFileInputRef}
+                    accept="image/*"
+                    onChange={(e) => handleFileSelect(e, true)}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => editFileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="btn btn-secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Upload size={16} />
+                    {isUploading ? 'Uploading...' : 'Choose Photo from Files'}
+                  </button>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>or paste URL below</span>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="https://... or uploaded photo URL"
+                  value={editForm.coverUrl}
+                  onChange={(e) => setEditForm({ ...editForm, coverUrl: e.target.value })}
+                  className="form-input"
+                  style={{ marginTop: '8px' }}
+                />
+
+                {editForm.coverUrl && (
+                  <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <img
+                      src={editForm.coverUrl}
+                      alt="Cover Preview"
+                      style={{ width: '50px', height: '70px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                    />
+                    <span style={{ fontSize: '0.75rem', color: '#059669', fontWeight: 600 }}>✓ Attached Cover Photo</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px' }}>
+                <button type="button" onClick={() => setShowEditBookModal(null)} className="btn btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Create Catalog Entry
+                <button type="submit" disabled={isUploading} className="btn btn-primary">
+                  Save Changes
                 </button>
               </div>
             </form>
@@ -361,7 +748,7 @@ export const CatalogManager: React.FC = () => {
                 {showQrModal.copy.barcode}
               </div>
               <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                SHELF: {showQrModal.copy.shelfLocation} • ISBN: {showQrModal.book.isbn}
+                SHELF: {showQrModal.copy.shelfLocation} • ISBN: {showQrModal.book.isbn} • PRICE: ₹{showQrModal.book.price !== undefined ? Number(showQrModal.book.price).toFixed(0) : '499'}
               </div>
             </div>
 

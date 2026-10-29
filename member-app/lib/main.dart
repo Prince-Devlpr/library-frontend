@@ -21,6 +21,7 @@ class BookItem {
   final String publisher;
   final String category;
   final String coverUrl;
+  final double price;
   final int totalCopies;
   int availableCopies;
 
@@ -31,6 +32,7 @@ class BookItem {
     required this.author,
     required this.publisher,
     required this.category,
+    this.price = 499.0,
     required this.coverUrl,
     required this.totalCopies,
     required this.availableCopies,
@@ -909,6 +911,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   author: b['author']?.toString() ?? 'Unknown Author',
                   publisher: b['publisher']?.toString() ?? 'Central Library Press',
                   category: b['category']?.toString() ?? 'General',
+                  price: (b['price'] as num?)?.toDouble() ?? 499.0,
                   coverUrl: b['coverUrl']?.toString() ?? 'https://covers.openlibrary.org/b/isbn/${b['isbn']}-L.jpg',
                   totalCopies: (b['totalCopies'] as num?)?.toInt() ?? 1,
                   availableCopies: (b['availableCopies'] as num?)?.toInt() ?? 1,
@@ -2419,35 +2422,72 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          book.coverUrl,
-                          width: 75,
-                          height: 105,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            width: 75,
-                            height: 105,
-                            color: const Color(0xFFF1F5F9),
-                            child: const Icon(Icons.book, color: Color(0xFF94A3B8)),
-                          ),
-                        ),
+                        child: book.coverUrl.startsWith('data:image')
+                            ? Image.memory(
+                                base64Decode(book.coverUrl.split(',').last),
+                                width: 75,
+                                height: 105,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  width: 75,
+                                  height: 105,
+                                  color: const Color(0xFFF1F5F9),
+                                  child: const Icon(Icons.book, color: Color(0xFF94A3B8)),
+                                ),
+                              )
+                            : Image.network(
+                                book.coverUrl,
+                                width: 75,
+                                height: 105,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  width: 75,
+                                  height: 105,
+                                  color: const Color(0xFFF1F5F9),
+                                  child: const Icon(Icons.book, color: Color(0xFF94A3B8)),
+                                ),
+                              ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFFBFDBFE)),
-                            ),
-                            child: Text(
-                              book.category.toUpperCase(),
-                              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                            ),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEFF6FF),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                                ),
+                                child: Text(
+                                  book.category.toUpperCase(),
+                                  style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFFFDE68A)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.sell_outlined, size: 10, color: Color(0xFFB45309)),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '₹${book.price.toStringAsFixed(0)}',
+                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 4),
                           Text(
