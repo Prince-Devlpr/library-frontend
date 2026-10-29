@@ -137,9 +137,14 @@ export const api = {
     if (!res.ok || !json?.success) {
       throw new Error(json?.error?.message || 'Failed to process return on backend');
     }
-    const loan = json.data;
-    const isOverdue = loan.status === 'OVERDUE' || (loan.fine && Number(loan.fine.amount) > 0);
-    const fineAmount = loan.fine ? Number(loan.fine.amount) : 0;
+    const raw = json.data;
+    const loan = {
+      ...raw,
+      copy: raw.copy || { barcode: raw.barcode, book: { title: raw.bookTitle || 'Library Book' } },
+      user: raw.user || { name: raw.user?.name || 'Patron' },
+    };
+    const isOverdue = (raw.overdueDays && raw.overdueDays > 0) || (raw.fine && Number(raw.fine.amount) > 0) || raw.status === 'OVERDUE';
+    const fineAmount = raw.fine ? Number(raw.fine.amount) : 0;
     return {
       loan,
       isOverdue,
