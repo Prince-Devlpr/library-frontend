@@ -2255,14 +2255,26 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          _buildExploreCatalog(),
-          _buildReservationsScreen(),
-          _buildDigitalCardScreen(),
-          _buildLoansAndFinesScreen(),
-        ],
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 240),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey<int>(_currentIndex),
+          child: _currentIndex == 0
+              ? _buildExploreCatalog()
+              : _currentIndex == 1
+                  ? _buildReservationsScreen()
+                  : _currentIndex == 2
+                      ? _buildDigitalCardScreen()
+                      : _buildLoansAndFinesScreen(),
+        ),
       ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
@@ -2309,21 +2321,23 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
+  String _selectedCategory = 'All';
   String _searchQuery = '';
 
   // ---------------------------------------------------------
   // TAB 0: EXPLORE CATALOG
   // ---------------------------------------------------------
   Widget _buildExploreCatalog() {
-    final displayedBooks = _searchQuery.isEmpty
-        ? _books
-        : _books
-            .where((b) =>
-                b.title.toLowerCase().contains(_searchQuery) ||
-                b.author.toLowerCase().contains(_searchQuery) ||
-                b.category.toLowerCase().contains(_searchQuery) ||
-                b.isbn.toLowerCase().contains(_searchQuery))
-            .toList();
+    final displayedBooks = _books.where((b) {
+      final matchesSearch = _searchQuery.isEmpty ||
+          b.title.toLowerCase().contains(_searchQuery) ||
+          b.author.toLowerCase().contains(_searchQuery) ||
+          b.category.toLowerCase().contains(_searchQuery) ||
+          b.isbn.toLowerCase().contains(_searchQuery);
+      final matchesCategory = _selectedCategory == 'All' ||
+          b.category.toLowerCase() == _selectedCategory.toLowerCase();
+      return matchesSearch && matchesCategory;
+    }).toList();
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -2371,7 +2385,49 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
+
+          // Horizontal Category Filter Pills
+          SizedBox(
+            height: 36,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                'All',
+                'Computer Science',
+                'Finance',
+                'Science Fiction',
+                'Biography',
+                'Self-Improvement',
+              ].map((cat) {
+                final isSelected = _selectedCategory == cat;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(cat),
+                    selected: isSelected,
+                    onSelected: (_) => setState(() => _selectedCategory = cat),
+                    selectedColor: const Color(0xFF2563EB),
+                    backgroundColor: Colors.white,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : const Color(0xFF475569),
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      side: BorderSide(
+                        color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    showCheckmark: false,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
 
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2612,125 +2668,212 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               final minutes = remaining.inMinutes % 60;
 
               return Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
+                margin: const EdgeInsets.only(bottom: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: const BorderSide(color: Color(0xFFE2E8F0)),
+                ),
+                elevation: 0,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.white,
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x08000000), blurRadius: 16, offset: Offset(0, 4)),
+                    ],
+                  ),
                   child: Column(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('PICKUP RESERVATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
-                                const SizedBox(height: 4),
-                                Text(res.bookTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                                Text('by ${res.author}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFFBEB),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFFDE68A)),
-                            ),
-                            child: Text(
-                              '${hours}h ${minutes}m left',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // QR Container
+                      // Header Ribbon
                       Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        child: QrImageView(
-                          data: 'lms:v1:r:${res.qrToken}',
-                          version: QrVersions.auto,
-                          size: 180,
-                          gapless: true,
-                          backgroundColor: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-
-                      // Fallback Pickup Code
-                      Text(
-                        res.pickupCode,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 4,
-                          color: Color(0xFF0284C7),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Present this QR or code at the library counter to collect.',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Allocated Book Barcode: ${res.barcode}',
-                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF94A3B8)),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: res.paymentStatus == 'PAID'
-                              ? const Color(0xFFECFDF5)
-                              : const Color(0xFFFFFBEB),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: res.paymentStatus == 'PAID'
-                                ? const Color(0xFFA7F3D0)
-                                : const Color(0xFFFDE68A),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(16),
+                            topRight: Radius.circular(16),
                           ),
+                          border: Border(bottom: BorderSide(color: Color(0xFFFDE68A))),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Expanded(
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    res.paymentStatus == 'PAID' ? Icons.check_circle : Icons.storefront,
-                                    size: 16,
-                                    color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
+                            Row(
+                              children: const [
+                                Icon(Icons.timer_outlined, size: 16, color: Color(0xFFD97706)),
+                                SizedBox(width: 6),
+                                Text(
+                                  'HOLD ACTIVE • DESK PICKUP',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.8,
+                                    color: Color(0xFFD97706),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      res.paymentStatus == 'PAID'
-                                          ? 'Holding Deposit: PAID ONLINE (₹20.00)'
-                                          : 'Holding Deposit: PAY CASH AT DESK (₹20.00)',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD97706),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '${hours}h ${minutes}m remaining',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            // Book Details
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    res.bookTitle,
+                                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text('by ${res.author}', style: const TextStyle(fontSize: 13, color: Color(0xFF475569))),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 18),
+
+                            // QR Container
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: QrImageView(
+                                data: 'lms:v1:r:${res.qrToken}',
+                                version: QrVersions.auto,
+                                size: 175,
+                                gapless: true,
+                                backgroundColor: const Color(0xFFF8FAFC),
+                              ),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Pickup Code Box
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0F9FF),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFBAE6FD)),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text(
+                                    'COUNTER CLAIM CODE',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.0,
+                                      color: Color(0xFF0284C7),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    res.pickupCode,
+                                    style: const TextStyle(
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 4,
+                                      color: Color(0xFF0369A1),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 6),
+
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Present this QR pass or 6-digit claim code at the library counter.',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 4),
                             Text(
-                              res.paymentMethod == 'RAZORPAY' ? 'RAZORPAY' : 'CASH',
-                              style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF475569), fontWeight: FontWeight.bold),
+                              'Allocated Barcode: ${res.barcode}',
+                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF94A3B8)),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Deposit / Payment Pill
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: res.paymentStatus == 'PAID'
+                                    ? const Color(0xFFECFDF5)
+                                    : const Color(0xFFFFFBEB),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: res.paymentStatus == 'PAID'
+                                      ? const Color(0xFFA7F3D0)
+                                      : const Color(0xFFFDE68A),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          res.paymentStatus == 'PAID' ? Icons.check_circle : Icons.storefront,
+                                          size: 16,
+                                          color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            res.paymentStatus == 'PAID'
+                                                ? 'Holding Deposit: PAID ONLINE (₹20.00)'
+                                                : 'Holding Deposit: PAY CASH AT DESK (₹20.00)',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: res.paymentStatus == 'PAID' ? const Color(0xFF059669) : const Color(0xFFD97706),
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                                    ),
+                                    child: Text(
+                                      res.paymentMethod == 'RAZORPAY' ? 'RAZORPAY' : 'CASH DESK',
+                                      style: const TextStyle(fontSize: 9, fontFamily: 'monospace', color: Color(0xFF475569), fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
@@ -2869,152 +3012,293 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0), width: 1.5),
-                boxShadow: const [
-                  BoxShadow(color: Color(0x0D000000), blurRadius: 16, offset: Offset(0, 4)),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'CENTRAL UNIVERSITY LIBRARY',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.0,
-                            color: Color(0xFF2563EB),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFECFDF5),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFA7F3D0)),
-                        ),
-                        child: const Text(
-                          'ACTIVE PATRON',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
-                        ),
-                      ),
-                    ],
+            children: [
+              // -----------------------------------------------------
+              // PREMIUM PHYSICAL-STYLE PATRON PASS CARD
+              // -----------------------------------------------------
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0F172A), Color(0xFF1E3A8A), Color(0xFF2563EB)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const Divider(height: 24, color: Color(0xFFE2E8F0)),
-
-                  Row(
-                    children: [
-                      Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(color: const Color(0xFFBFDBFE)),
-                        ),
-                        child: const Icon(Icons.person, size: 28, color: Color(0xFF2563EB)),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x592563EB),
+                      blurRadius: 24,
+                      offset: Offset(0, 10),
+                    ),
+                    BoxShadow(
+                      color: Color(0x22000000),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                  border: Border.all(
+                    color: const Color(0x33FFFFFF),
+                    width: 1.2,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Card Header: System Title & Chip Badge
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Row(
                           children: [
-                            Text(
-                              memberName,
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                              overflow: TextOverflow.ellipsis,
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: const Color(0x26FFFFFF),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.account_balance, size: 16, color: Colors.white),
                             ),
-                            Text(
-                              'Reg No: $memberId',
-                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFF64748B)),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            const SizedBox(width: 8),
                             const Text(
-                              'Status: Good Standing (Borrow Limit: 3)',
-                              style: TextStyle(fontSize: 11, color: Color(0xFF059669), fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
+                              'CENTRAL LIBRARY SYSTEM',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.2,
+                                color: Colors.white,
+                              ),
                             ),
                           ],
                         ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0x40059669),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0x99A7F3D0)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.verified, size: 11, color: Color(0xFFA7F3D0)),
+                              SizedBox(width: 4),
+                              Text(
+                                'ACTIVE PATRON',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.8,
+                                  color: Color(0xFFA7F3D0),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Smart Chip Simulation + Contactless Wave Icon
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Metallic EMV Chip
+                        Container(
+                          width: 46,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFFDE68A), Color(0xFFD97706), Color(0xFFF59E0B)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0x66B45309)),
+                          ),
+                          child: Stack(
+                            children: [
+                              Center(
+                                child: Container(
+                                  width: 24,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: const Color(0x8092400E)),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Contactless Icon
+                        Transform.rotate(
+                          angle: 1.5708,
+                          child: const Icon(
+                            Icons.wifi,
+                            size: 26,
+                            color: Color(0xB3FFFFFF),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 22),
+
+                    // Patron Identity Details
+                    Text(
+                      memberName.toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.2,
+                        color: Colors.white,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'ID: $memberId',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            letterSpacing: 1.1,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xD9FFFFFF),
+                          ),
+                        ),
+                        const Text(
+                          'CAPACITY: 3 BOOKS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            letterSpacing: 0.8,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xBFFFFFFF),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
 
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: QrImageView(
-                      data: 'lms:v1:m:$memberQrToken',
-                      version: QrVersions.auto,
-                      size: 190,
-                      gapless: true,
-                      backgroundColor: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'TOKEN: $memberQrToken',
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      color: Color(0xFF64748B),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Scan for walk-in borrowing & circulation counter verification',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF475569),
-                side: const BorderSide(color: Color(0xFFCBD5E1)),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              // -----------------------------------------------------
+              // QR VERIFICATION TICKET
+              // -----------------------------------------------------
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x08000000), blurRadius: 14, offset: Offset(0, 4)),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.qr_code_scanner, size: 16, color: Color(0xFF2563EB)),
+                        SizedBox(width: 6),
+                        Text(
+                          'CIRCULATION VERIFICATION PASS',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.0,
+                            color: Color(0xFF2563EB),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // QR Code with subtle boundary
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: QrImageView(
+                        data: 'lms:v1:m:$memberQrToken',
+                        version: QrVersions.auto,
+                        size: 190,
+                        gapless: true,
+                        backgroundColor: const Color(0xFFF8FAFC),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'TOKEN: $memberQrToken',
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF475569),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Present this dynamic pass at the circulation desk for walk-in borrowing & identity verification.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.4),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
-              onPressed: _regenerateCardToken,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text(
-                'Regenerate Token',
-                overflow: TextOverflow.ellipsis,
+
+              const SizedBox(height: 16),
+
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF2563EB),
+                  side: const BorderSide(color: Color(0xFFBFDBFE)),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: _regenerateCardToken,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text(
+                  'Regenerate Token',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ---------------------------------------------------------
   // TAB 3: MY LOANS & FINES (RAZORPAY INTEGRATED)
   // ---------------------------------------------------------
   Widget _buildLoansAndFinesScreen() {
     final pendingSlips = _cashSlips.where((s) => s.status == 'PENDING').toList();
+    final totalOutstandingFines = _loans.fold<double>(0.0, (acc, item) => acc + item.fineAmount);
 
     return RefreshIndicator(
       onRefresh: _fetchUserLoansAndReservations,
@@ -3023,6 +3307,88 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
+        // -----------------------------------------------------
+        // FINANCIAL ACCOUNT STATUS BANNER
+        // -----------------------------------------------------
+        if (totalOutstandingFines > 0)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFECACA)),
+              boxShadow: const [
+                BoxShadow(color: Color(0x06000000), blurRadius: 10, offset: Offset(0, 2)),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0x1FDC2626),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.warning_amber_rounded, size: 24, color: Color(0xFFDC2626)),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'OUTSTANDING CHARGES ACCRUED',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          color: Color(0xFFDC2626),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Total Due: ₹${totalOutstandingFines.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF991B1B),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Settle overdue fines via Razorpay or generate a cash counter voucher below.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF7F1D1D)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (_loans.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFA7F3D0)),
+            ),
+            child: Row(
+              children: const [
+                Icon(Icons.check_circle_outline, size: 20, color: Color(0xFF059669)),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Patron Account in Good Standing • No outstanding fines or penalties.',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF065F46)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         // -----------------------------------------------------
         // ACTIVE LOANS
         // -----------------------------------------------------

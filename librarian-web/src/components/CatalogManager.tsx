@@ -242,31 +242,70 @@ export const CatalogManager: React.FC = () => {
           id="btn-add-new-book"
           onClick={() => setShowAddBookModal(true)}
           className="btn btn-primary"
+          style={{ padding: '10px 18px', gap: '8px' }}
         >
           <Plus size={18} />
           Add New Title
         </button>
       </div>
 
+      {/* Quick Category Filter Pills */}
+      <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+        {['All Categories', 'Computer Science', 'Finance', 'Science Fiction', 'Self-Improvement', 'Biography'].map((cat) => {
+          const isSelected = (cat === 'All Categories' && !searchTerm) || searchTerm.toLowerCase() === cat.toLowerCase();
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => {
+                if (cat === 'All Categories') {
+                  setSearchTerm('');
+                  loadBooks();
+                } else {
+                  setSearchTerm(cat);
+                  loadBooks(cat);
+                }
+              }}
+              className={`tab-pill ${isSelected ? 'active' : ''}`}
+              style={{ padding: '6px 14px', fontSize: '0.8125rem' }}
+            >
+              {cat}
+            </button>
+          );
+        })}
+      </div>
+
       {isLoading && books.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
-          Loading library catalog...
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="glass-panel" style={{ padding: '20px', height: '240px' }}>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                <div className="skeleton" style={{ width: '80px', height: '110px' }} />
+                <div style={{ flex: 1 }}>
+                  <div className="skeleton" style={{ width: '40%', height: '18px', marginBottom: '8px' }} />
+                  <div className="skeleton" style={{ width: '85%', height: '20px', marginBottom: '6px' }} />
+                  <div className="skeleton" style={{ width: '60%', height: '14px' }} />
+                </div>
+              </div>
+              <div className="skeleton" style={{ width: '100%', height: '36px', marginTop: '20px' }} />
+            </div>
+          ))}
         </div>
       )}
 
       {/* Book Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
         {books.map((book) => (
-          <div key={book.id} className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div key={book.id} className="glass-panel hover-lift" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ display: 'flex', gap: '16px' }}>
               {book.coverUrl ? (
                 <img
                   src={book.coverUrl}
                   alt={book.title}
-                  style={{ width: '80px', height: '110px', objectFit: 'cover', borderRadius: 'var(--radius-sm)' }}
+                  style={{ width: '80px', height: '110px', objectFit: 'cover', borderRadius: 'var(--radius-md)', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.06)' }}
                 />
               ) : (
-                <div style={{ width: '80px', height: '110px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: '80px', height: '110px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <ImageIcon size={32} color="var(--text-muted)" />
                 </div>
               )}

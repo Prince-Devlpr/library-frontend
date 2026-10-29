@@ -210,44 +210,55 @@ export const CirculationDesk: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Subtabs */}
-      <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px' }}>
-        <button
-          id="tab-walkin"
-          onClick={() => { setActiveSubTab('walkin'); setError(null); setSuccess(null); }}
-          className={`btn ${activeSubTab === 'walkin' ? 'btn-primary' : 'btn-secondary'}`}
-        >
-          <UserCheck size={18} />
-          Walk-in Borrowing
-        </button>
-        <button
-          id="tab-pickup"
-          onClick={() => { setActiveSubTab('pickup'); setError(null); setSuccess(null); }}
-          className={`btn ${activeSubTab === 'pickup' ? 'btn-primary' : 'btn-secondary'}`}
-        >
-          <Clock size={18} />
-          Online Reservation Pickup (24h)
-        </button>
-        <button
-          id="tab-return"
-          onClick={() => { setActiveSubTab('return'); setError(null); setSuccess(null); }}
-          className={`btn ${activeSubTab === 'return' ? 'btn-primary' : 'btn-secondary'}`}
-        >
-          <BookOpen size={18} />
-          Book Returns & Condition Inspection
-        </button>
+      {/* Subtabs Segmented Bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '16px' }}>
+        <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '4px', borderRadius: 'var(--radius-lg)', gap: '4px' }}>
+          <button
+            id="tab-walkin"
+            onClick={() => { setActiveSubTab('walkin'); setError(null); setSuccess(null); }}
+            className={`tab-pill ${activeSubTab === 'walkin' ? 'active' : ''}`}
+          >
+            <UserCheck size={16} />
+            Walk-in Borrowing
+          </button>
+          <button
+            id="tab-pickup"
+            onClick={() => { setActiveSubTab('pickup'); setError(null); setSuccess(null); }}
+            className={`tab-pill ${activeSubTab === 'pickup' ? 'active' : ''}`}
+          >
+            <Clock size={16} />
+            Online Reservation Pickup (24h)
+            {reservationsList.filter((r) => r.status === 'ACTIVE').length > 0 && (
+              <span style={{ background: activeSubTab === 'pickup' ? '#ffffff' : '#2563eb', color: activeSubTab === 'pickup' ? '#2563eb' : '#ffffff', borderRadius: '10px', fontSize: '11px', padding: '1px 6px', fontWeight: 800 }}>
+                {reservationsList.filter((r) => r.status === 'ACTIVE').length}
+              </span>
+            )}
+          </button>
+          <button
+            id="tab-return"
+            onClick={() => { setActiveSubTab('return'); setError(null); setSuccess(null); }}
+            className={`tab-pill ${activeSubTab === 'return' ? 'active' : ''}`}
+          >
+            <BookOpen size={16} />
+            Book Returns & Condition Inspection
+          </button>
+        </div>
+
+        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+          Workstation: <strong>Terminal-01</strong> • Status: <span style={{ color: '#059669', fontWeight: 600 }}>Active</span>
+        </div>
       </div>
 
       {/* Global Alerts */}
       {error && (
-        <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: 'var(--radius-md)', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px', color: '#fca5a5' }}>
-          <AlertTriangle size={20} />
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px', color: '#b91c1c', fontSize: '0.875rem', fontWeight: 500 }}>
+          <AlertTriangle size={18} color="#dc2626" />
           <span>{error}</span>
         </div>
       )}
       {success && (
-        <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: 'var(--radius-md)', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px', color: '#6ee7b7' }}>
-          <CheckCircle2 size={20} />
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 'var(--radius-md)', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px', color: '#047857', fontSize: '0.875rem', fontWeight: 500 }}>
+          <CheckCircle2 size={18} color="#059669" />
           <span>{success}</span>
         </div>
       )}
