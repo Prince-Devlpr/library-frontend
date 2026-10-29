@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
-import type { Loan, User, Reservation } from '../types';
-import { BookOpen, UserCheck, QrCode, CheckCircle2, AlertTriangle, Clock, ShieldCheck, RefreshCw, ArrowRight } from 'lucide-react';
+import type { Loan, User, Reservation, PaymentReceipt } from '../types';
+import { BookOpen, UserCheck, QrCode, CheckCircle2, AlertTriangle, Clock, ShieldCheck, RefreshCw, ArrowRight, DollarSign, Receipt } from 'lucide-react';
 
 export const CirculationDesk: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'walkin' | 'pickup' | 'return'>('walkin');
@@ -23,7 +23,21 @@ export const CirculationDesk: React.FC = () => {
   // Return State
   const [returnBarcode, setReturnBarcode] = useState('');
   const [returnCondition, setReturnCondition] = useState('GOOD');
-  const [returnResult, setReturnResult] = useState<{ loan: Loan; isOverdue: boolean; fineAmount: number } | null>(null);
+  const [damageFineAmount, setDamageFineAmount] = useState<string>('150');
+  const [damageNotes, setDamageNotes] = useState<string>('');
+  const [isProcessingReturn, setIsProcessingReturn] = useState(false);
+  const [isCollectingReturnFine, setIsCollectingReturnFine] = useState(false);
+  const [collectedFineReceipt, setCollectedFineReceipt] = useState<PaymentReceipt | null>(null);
+  const [returnResult, setReturnResult] = useState<{
+    loan: any;
+    isOverdue: boolean;
+    hasFine: boolean;
+    fineAmount: number;
+    overdueFineAmount: number;
+    conditionFineAmount: number;
+    condition: string;
+    fine: any | null;
+  } | null>(null);
 
   // Shared status & errors
   const [error, setError] = useState<string | null>(null);
@@ -128,18 +142,69 @@ export const CirculationDesk: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleConditionChange = (cond: string) => {
+    setReturnCondition(cond);
+    if (cond === 'DAMAGED') {
+      if (!damageFineAmount || damageFineAmount === '0' || damageFineAmount === '500') {
+        setDamageFineAmount('150');
+      }
+    } else if (cond === 'LOST') {
+      if (!damageFineAmount || damageFineAmount === '0' || damageFineAmount === '150') {
+        setDamageFineAmount('500');
+      }
+    } else {
+      setDamageFineAmount('0');
+    }
+  };
+
   // Handle Book Return
   const handleConfirmReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setCollectedFineReceipt(null);
     if (!returnBarcode) return;
+    setIsProcessingReturn(true);
     try {
-      const res = await api.returnBook(returnBarcode.trim());
+      const assessedFine = (returnCondition === 'DAMAGED' || returnCondition === 'LOST')
+        ? (parseFloat(damageFineAmount) || 0)
+        : 0;
+      const res = await api.returnBook(
+        returnBarcode.trim(),
+        returnCondition,
+        assessedFine,
+        damageNotes.trim() || undefined
+      );
       setReturnResult(res);
-      setSuccess(`Book return processed. Status: Returned [Condition: ${returnCondition}]`);
+      setSuccess(`Book return processed. Condition: ${returnCondition}${res.hasFine ? ` - Fine assessed: ₹${res.fineAmount.toFixed(2)}` : ' - No fine assessed'}`);
       setReturnBarcode('');
+      setDamageNotes('');
     } catch (err: any) {
       setError(err.message || 'Failed to process return');
+    } finally {
+      setIsProcessingReturn(false);
+    }
+  };
+
+  // Handle immediate counter fine cash settlement
+  const handleSettleReturnFineCash = async (fineId: string) => {
+    setIsCollectingReturnFine(true);
+    try {
+      const rec = await api.recordCashPayment(fineId, `Counter cash settlement upon ${returnResult?.condition || 'RETURN'}`);
+      setCollectedFineReceipt(rec);
+      if (returnResult && returnResult.fine) {
+        setReturnResult({
+          ...returnResult,
+          fine: {
+            ...returnResult.fine,
+            paymentStatus: 'PAID',
+          },
+        });
+      }
+      setSuccess(`Fine payment of ₹${rec.amountRupees} recorded successfully! Receipt #${rec.receiptNumber}`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to record cash payment');
+    } finally {
+      setIsCollectingReturnFine(false);
     }
   };
 
@@ -519,16 +584,19 @@ export const CirculationDesk: React.FC = () => {
 
       {/* BOOK RETURNS & CONDITION INSPECTION */}
       {activeSubTab === 'return' && (
-        <div style={{ maxWidth: '680px', margin: '0 auto', width: '100%' }}>
+        <div style={{ maxWidth: '720px', margin: '0 auto', width: '100%' }}>
           <div className="glass-panel" style={{ padding: '28px' }}>
-            <h3 style={{ marginBottom: '8px' }}>Scan & Return Book Copy</h3>
+            <h3 style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <BookOpen size={20} color="var(--accent-primary)" />
+              Scan & Return Book Copy
+            </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '20px' }}>
-              The system automatically checks for active loans, calculates overdue fines, and restores the copy to AVAILABLE status.
+              Verify book condition on return. The system calculates overdue fines, assesses damage/loss penalties, updates copy status, and notifies the patron.
             </p>
 
             <form onSubmit={handleConfirmReturn}>
-              <div className="form-group">
-                <label className="form-label">Book Copy Barcode</label>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" style={{ fontWeight: 600, display: 'block', marginBottom: '6px' }}>Book Copy Barcode</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     id="input-return-barcode"
@@ -538,6 +606,7 @@ export const CirculationDesk: React.FC = () => {
                     onChange={(e) => setReturnBarcode(e.target.value)}
                     className="form-input"
                     style={{ flex: 1 }}
+                    required
                   />
                   <button
                     type="button"
@@ -545,57 +614,235 @@ export const CirculationDesk: React.FC = () => {
                     className="btn btn-secondary"
                     style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                   >
-                    + Fill Overdue Copy
+                    + Fill Demo Copy
                   </button>
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Book Condition Inspection</label>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" style={{ fontWeight: 600, display: 'block', marginBottom: '6px' }}>Book Condition Inspection</label>
                 <select
+                  id="select-return-condition"
                   value={returnCondition}
-                  onChange={(e) => setReturnCondition(e.target.value)}
+                  onChange={(e) => handleConditionChange(e.target.value)}
                   className="form-input"
+                  style={{ width: '100%', padding: '10px 12px' }}
                 >
-                  <option value="GOOD">Good / Pristine Condition</option>
-                  <option value="MINOR_WEAR">Acceptable / Minor Page Wear</option>
-                  <option value="DAMAGED">Damaged / Requires Repair Charge</option>
-                  <option value="LOST">Declared Lost</option>
+                  <option value="GOOD">✓ Good / Pristine Condition (Restore to Shelf)</option>
+                  <option value="MINOR_WEAR">✓ Acceptable / Minor Wear (Restore to Shelf)</option>
+                  <option value="DAMAGED">⚠️ Damaged / Torn / Water Spill (Assess Repair Fine & Quarantine)</option>
+                  <option value="LOST">❌ Declared Lost (Assess Replacement Cost & Write Off)</option>
                 </select>
               </div>
+
+              {/* Damage / Loss Penalty Assessment Inputs */}
+              {(returnCondition === 'DAMAGED' || returnCondition === 'LOST') && (
+                <div
+                  style={{
+                    marginBottom: '20px',
+                    padding: '16px 20px',
+                    borderRadius: 'var(--radius-md)',
+                    background: returnCondition === 'DAMAGED' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                    border: `1px solid ${returnCondition === 'DAMAGED' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                    <AlertTriangle size={18} color={returnCondition === 'DAMAGED' ? '#f59e0b' : '#ef4444'} />
+                    <strong style={{ fontSize: '0.875rem', color: returnCondition === 'DAMAGED' ? '#d97706' : '#dc2626' }}>
+                      {returnCondition === 'DAMAGED' ? 'Assess Damage & Repair Charge' : 'Assess Lost Book Replacement Charge'}
+                    </strong>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label className="form-label" style={{ fontSize: '0.8125rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                      Fine Amount to Charge Patron (₹)
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontWeight: 700, color: 'var(--text-secondary)' }}>₹</span>
+                        <input
+                          id="input-damage-fine-amount"
+                          type="number"
+                          min="0"
+                          step="10"
+                          value={damageFineAmount}
+                          onChange={(e) => setDamageFineAmount(e.target.value)}
+                          className="form-input"
+                          style={{ paddingLeft: '28px', width: '100%' }}
+                          placeholder="Enter fine amount"
+                        />
+                      </div>
+                      {/* Preset quick buttons */}
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {returnCondition === 'DAMAGED' ? (
+                          <>
+                            <button type="button" onClick={() => setDamageFineAmount('100')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 10px' }}>₹100</button>
+                            <button type="button" onClick={() => setDamageFineAmount('150')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 10px' }}>₹150 (Std)</button>
+                            <button type="button" onClick={() => setDamageFineAmount('300')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 10px' }}>₹300</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => setDamageFineAmount('300')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 10px' }}>₹300</button>
+                            <button type="button" onClick={() => setDamageFineAmount('500')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 10px' }}>₹500 (Std)</button>
+                            <button type="button" onClick={() => setDamageFineAmount('1000')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 10px' }}>₹1,000</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.8125rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                      Condition / Incident Notes
+                    </label>
+                    <input
+                      id="input-damage-notes"
+                      type="text"
+                      value={damageNotes}
+                      onChange={(e) => setDamageNotes(e.target.value)}
+                      className="form-input"
+                      placeholder={returnCondition === 'DAMAGED' ? 'e.g. Broken spine, torn pages 40-52, liquid stain' : 'e.g. Patron reported lost during transit'}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <button
                 id="btn-confirm-return"
                 type="submit"
-                disabled={!returnBarcode}
+                disabled={!returnBarcode || isProcessingReturn}
                 className="btn btn-primary"
-                style={{ width: '100%', padding: '14px', fontSize: '1rem', marginTop: '8px' }}
+                style={{ width: '100%', padding: '14px', fontSize: '1rem', marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
               >
-                Confirm Book Return
+                {isProcessingReturn ? (
+                  <>
+                    <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                    Processing Return & Assessment...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} />
+                    Confirm Book Return & Process Assessment
+                  </>
+                )}
               </button>
             </form>
 
+            {/* Return Result & Receipt */}
             {returnResult && (
               <div style={{ marginTop: '24px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 'var(--radius-md)', padding: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h4>Return Receipt</h4>
-                  <span className="badge badge-available">RETURNED</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Receipt size={18} color="var(--accent-primary)" />
+                    Book Return Receipt
+                  </h4>
+                  <span
+                    className={`badge ${
+                      returnResult.condition === 'DAMAGED'
+                        ? 'badge-reserved'
+                        : returnResult.condition === 'LOST'
+                          ? 'badge-overdue'
+                          : 'badge-available'
+                    }`}
+                    style={{ fontSize: '0.8125rem', padding: '4px 10px' }}
+                  >
+                    {returnResult.condition === 'DAMAGED'
+                      ? 'DAMAGED (QUARANTINED)'
+                      : returnResult.condition === 'LOST'
+                        ? 'DECLARED LOST'
+                        : 'RETURNED (AVAILABLE)'}
+                  </span>
                 </div>
-                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                  <div><strong>Book:</strong> {returnResult.loan.copy.book?.title}</div>
-                  <div><strong>Barcode:</strong> {returnResult.loan.copy.barcode}</div>
-                  <div><strong>Patron:</strong> {returnResult.loan.user?.name}</div>
-                  <div><strong>Return Timestamp:</strong> {new Date().toLocaleString()}</div>
-                  {returnResult.isOverdue ? (
-                    <div style={{ marginTop: '10px', padding: '10px', background: '#fef2f2', borderRadius: 'var(--radius-sm)', border: '1px solid #fecaca', color: '#b91c1c' }}>
-                      <strong>⚠️ Overdue Fine Assessed: ₹{returnResult.fineAmount.toFixed(2)}</strong>
-                      <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
-                        Settlement can be made via Counter Cash or Online via Razorpay in Patron App.
+
+                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+                  <div><strong>Book:</strong> {returnResult.loan.copy?.book?.title || returnResult.loan.bookTitle}</div>
+                  <div><strong>Barcode:</strong> <code style={{ fontFamily: 'monospace', color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px' }}>{returnResult.loan.copy?.barcode || returnResult.loan.barcode}</code></div>
+                  <div><strong>Patron:</strong> {returnResult.loan.user?.name || 'Patron'}</div>
+                  <div><strong>Inspection Condition:</strong> <span style={{ fontWeight: 600 }}>{returnResult.condition}</span></div>
+                  <div><strong>Timestamp:</strong> {new Date().toLocaleString()}</div>
+
+                  {/* Fine Breakdown */}
+                  {returnResult.hasFine ? (
+                    <div style={{ marginTop: '16px', padding: '16px', background: '#fff1f2', borderRadius: 'var(--radius-sm)', border: '1px solid #fecdd3' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <strong style={{ color: '#be123c', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <AlertTriangle size={18} />
+                          Fine Assessed: ₹{returnResult.fineAmount.toFixed(2)}
+                        </strong>
+                        <span
+                          className={`badge ${returnResult.fine?.paymentStatus === 'PAID' ? 'badge-available' : 'badge-overdue'}`}
+                          style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                        >
+                          {returnResult.fine?.paymentStatus === 'PAID' ? '✓ PAID & SETTLED' : 'UNPAID'}
+                        </span>
                       </div>
+
+                      <div style={{ fontSize: '0.8125rem', color: '#881337', marginBottom: '12px' }}>
+                        {returnResult.overdueFineAmount > 0 && (
+                          <div>• Overdue Days Fine: ₹{returnResult.overdueFineAmount.toFixed(2)}</div>
+                        )}
+                        {returnResult.conditionFineAmount > 0 && (
+                          <div>• {returnResult.condition === 'DAMAGED' ? 'Damage & Repair Fee' : 'Replacement Fee'}: ₹{returnResult.conditionFineAmount.toFixed(2)}</div>
+                        )}
+                        {returnResult.fine?.reason && (
+                          <div style={{ marginTop: '4px', fontStyle: 'italic' }}>Reason: {returnResult.fine.reason}</div>
+                        )}
+                      </div>
+
+                      {/* Instant Cash Settlement at Counter */}
+                      {returnResult.fine?.paymentStatus === 'UNPAID' && returnResult.fine?.id && (
+                        <div style={{ borderTop: '1px dashed #fca5a5', paddingTop: '12px', marginTop: '12px' }}>
+                          <div style={{ fontSize: '0.8125rem', color: '#9f1239', marginBottom: '8px' }}>
+                            Patron can pay now with cash at circulation counter or online via the Mobile App.
+                          </div>
+                          <button
+                            id="btn-settle-return-fine-cash"
+                            type="button"
+                            disabled={isCollectingReturnFine}
+                            onClick={() => handleSettleReturnFineCash(returnResult.fine.id)}
+                            className="btn btn-primary"
+                            style={{
+                              background: '#059669',
+                              borderColor: '#047857',
+                              padding: '10px 18px',
+                              fontSize: '0.875rem',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                            }}
+                          >
+                            {isCollectingReturnFine ? (
+                              <>
+                                <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                                Recording Cash Payment...
+                              </>
+                            ) : (
+                              <>
+                                <DollarSign size={16} />
+                                Collect Cash Now (₹{returnResult.fineAmount.toFixed(2)}) & Issue Receipt
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {collectedFineReceipt && (
+                        <div style={{ marginTop: '12px', padding: '12px', background: '#ecfdf5', borderRadius: '6px', border: '1px solid #a7f3d0', color: '#065f46' }}>
+                          <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <CheckCircle2 size={16} color="#059669" />
+                            Cash Payment Successfully Settled!
+                          </div>
+                          <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                            Receipt #{collectedFineReceipt.receiptNumber} generated. Official cash transaction logged.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    <div style={{ marginTop: '10px', color: '#059669', fontWeight: 600 }}>
-                      ✓ Returned on time with zero fines.
+                    <div style={{ marginTop: '12px', padding: '10px 14px', background: '#ecfdf5', borderRadius: 'var(--radius-sm)', border: '1px solid #a7f3d0', color: '#047857', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <CheckCircle2 size={16} color="#059669" />
+                      Returned in acceptable condition with zero fines.
                     </div>
                   )}
                 </div>

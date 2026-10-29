@@ -75,6 +75,7 @@ export interface Fine {
   loanId: string;
   amount: number | string;
   amountPaise: number;
+  reason?: string;
   paymentStatus: PaymentStatus;
   paymentDate?: string | null;
   loan?: Loan;

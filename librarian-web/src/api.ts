@@ -153,11 +153,16 @@ export const api = {
   },
 
   // Return Book
-  async returnBook(barcode: string) {
+  async returnBook(barcode: string, condition?: string, damageFine?: number, notes?: string) {
     const res = await fetch(`${API_BASE_URL}/loans/return`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ barcode: barcode.trim() }),
+      body: JSON.stringify({
+        barcode: barcode.trim(),
+        condition: condition || 'GOOD',
+        damageFine: damageFine !== undefined ? Number(damageFine) : undefined,
+        notes: notes || undefined,
+      }),
     });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json?.success) {
@@ -169,12 +174,18 @@ export const api = {
       copy: raw.copy || { barcode: raw.barcode, book: { title: raw.bookTitle || 'Library Book' } },
       user: raw.user || { name: raw.user?.name || 'Patron' },
     };
-    const isOverdue = (raw.overdueDays && raw.overdueDays > 0) || (raw.fine && Number(raw.fine.amount) > 0) || raw.status === 'OVERDUE';
     const fineAmount = raw.fine ? Number(raw.fine.amount) : 0;
+    const isOverdue = (raw.overdueDays && raw.overdueDays > 0) || (raw.overdueFineAmount && raw.overdueFineAmount > 0);
+    const hasFine = fineAmount > 0;
     return {
       loan,
       isOverdue,
+      hasFine,
       fineAmount,
+      overdueFineAmount: raw.overdueFineAmount || 0,
+      conditionFineAmount: raw.conditionFineAmount || 0,
+      condition: raw.condition || condition || 'GOOD',
+      fine: raw.fine || null,
     };
   },
 
@@ -240,6 +251,7 @@ export const api = {
         loanId: f.loanId || f.id,
         amount: Number(f.amount) || (f.amountPaise ? f.amountPaise / 100 : 0),
         amountPaise: f.amountPaise || Math.round((Number(f.amount) || 0) * 100),
+        reason: f.reason,
         paymentStatus: f.paymentStatus || 'UNPAID',
         paymentDate: f.paymentDate,
       },

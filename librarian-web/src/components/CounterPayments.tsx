@@ -70,6 +70,11 @@ export const CounterPayments: React.FC = () => {
                     <td style={{ padding: '14px 12px' }}>{new Date(loan.dueDate).toLocaleDateString()}</td>
                     <td style={{ padding: '14px 12px', fontWeight: 700, color: 'var(--accent-danger)' }}>
                       ₹{Number(loan.fine?.amount || 0).toFixed(2)}
+                      {loan.fine?.reason && (
+                        <div style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          {loan.fine.reason}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '14px 12px' }}>
                       <span className={`badge ${loan.fine?.paymentStatus === 'PAID' ? 'badge-paid' : 'badge-unpaid'}`}>
