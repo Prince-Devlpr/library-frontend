@@ -793,38 +793,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   ];
 
   // Active Catalog populated dynamically from database API
-  late List<BookItem> _books;
+  List<BookItem> _books = [];
+  bool _isLoadingCatalog = true;
 
-  // Active User Reservations (populated dynamically / fallback)
-  final List<ReservationItem> _reservations = [
-    ReservationItem(
-      id: 'res-101',
-      bookTitle: 'Clean Code: A Handbook of Agile Software Craftsmanship',
-      author: 'Robert C. Martin',
-      barcode: 'CC-003',
-      pickupCode: 'RES-7492',
-      qrToken: 'res_a1b2c3d4e5f6',
-      expiryDate: DateTime.now().add(const Duration(hours: 21, minutes: 40)),
-      status: 'ACTIVE',
-      paymentMethod: 'CASH_COUNTER',
-      paymentStatus: 'UNPAID',
-      depositAmount: 20.0,
-    ),
-  ];
+  // Active User Reservations (populated directly from live PostgreSQL database)
+  final List<ReservationItem> _reservations = [];
 
-  // Active User Loans (populated dynamically / fallback)
-  final List<LoanItem> _loans = [
-    LoanItem(
-      id: 'ln-201',
-      bookTitle: 'Design Patterns: Elements of Reusable Object-Oriented Software',
-      author: 'Erich Gamma, Richard Helm',
-      barcode: 'DP-002',
-      issueDate: DateTime.now().subtract(const Duration(days: 16)),
-      dueDate: DateTime.now().subtract(const Duration(days: 2)), // 2 days overdue
-      status: 'OVERDUE',
-      fineAmount: 10.0,
-    ),
-  ];
+  // Active User Loans (populated directly from live PostgreSQL database)
+  final List<LoanItem> _loans = [];
 
   @override
   void initState() {
@@ -832,7 +808,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     memberName = widget.memberName;
     memberId = widget.memberId;
     memberQrToken = widget.memberQrToken;
-    _books = List<BookItem>.from(_fallbackBooks);
+    _books = [];
     _fetchCatalog();
     _fetchUserLoansAndReservations();
   }
@@ -854,7 +830,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         final json = jsonDecode(loansRes.body);
         if (json['success'] == true && json['data'] is List) {
           final List list = json['data'];
-          if (mounted && list.isNotEmpty) {
+          if (mounted) {
             setState(() {
               _loans.clear();
               for (final l in list) {
@@ -886,7 +862,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         final json = jsonDecode(resRes.body);
         if (json['success'] == true && json['data'] is List) {
           final List list = json['data'];
-          if (mounted && list.isNotEmpty) {
+          if (mounted) {
             setState(() {
               _reservations.clear();
               for (final r in list) {
@@ -900,6 +876,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     qrToken: r['qrToken']?.toString() ?? 'res_token',
                     expiryDate: DateTime.tryParse(r['expiryDate']?.toString() ?? '') ?? DateTime.now().add(const Duration(hours: 24)),
                     status: r['status']?.toString() ?? 'ACTIVE',
+                    paymentMethod: r['paymentMethod']?.toString() ?? 'CASH_COUNTER',
+                    paymentStatus: r['paymentStatus']?.toString() ?? 'UNPAID',
                   ),
                 );
               }
@@ -912,13 +890,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   /// Fetches real book details from database API with fallback to offline data
   Future<void> _fetchCatalog() async {
+    setState(() => _isLoadingCatalog = true);
     try {
-      final res = await http.get(Uri.parse('$backendApiBaseUrl/books?limit=50')).timeout(const Duration(seconds: 5));
+      final res = await http.get(Uri.parse('$backendApiBaseUrl/books?limit=50')).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final json = jsonDecode(res.body);
         final dynamic rawData = json['data'];
         final List items = rawData is List ? rawData : (rawData is Map && rawData['books'] is List ? rawData['books'] : []);
-        if (items.isNotEmpty && mounted) {
+        if (mounted) {
           setState(() {
             _books.clear();
             for (final b in items) {
@@ -940,7 +919,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         }
       }
     } catch (_) {
-      // Offline fallback: retains fallback books
+      // If offline or network failure and catalog is empty, load fallback
+      if (_books.isEmpty && mounted) {
+        setState(() {
+          _books = List<BookItem>.from(_fallbackBooks);
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingCatalog = false);
+      }
     }
   }
 
@@ -2316,10 +2304,22 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
+  String _searchQuery = '';
+
   // ---------------------------------------------------------
   // TAB 0: EXPLORE CATALOG
   // ---------------------------------------------------------
   Widget _buildExploreCatalog() {
+    final displayedBooks = _searchQuery.isEmpty
+        ? _books
+        : _books
+            .where((b) =>
+                b.title.toLowerCase().contains(_searchQuery) ||
+                b.author.toLowerCase().contains(_searchQuery) ||
+                b.category.toLowerCase().contains(_searchQuery) ||
+                b.isbn.toLowerCase().contains(_searchQuery))
+            .toList();
+
     return RefreshIndicator(
       onRefresh: _fetchCatalog,
       color: const Color(0xFF2563EB),
@@ -2334,57 +2334,107 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: const Color(0xFFCBD5E1)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.search, color: Color(0xFF64748B)),
-                SizedBox(width: 10),
+                const Icon(Icons.search, color: Color(0xFF64748B)),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
-                    decoration: InputDecoration(
+                    onChanged: (val) {
+                      setState(() {
+                        _searchQuery = val.trim().toLowerCase();
+                      });
+                    },
+                    decoration: const InputDecoration(
                       hintText: 'Search by title, author, topic...',
                       border: InputBorder.none,
                       hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
                     ),
                   ),
                 ),
+                if (_searchQuery.isNotEmpty)
+                  GestureDetector(
+                    onTap: () => setState(() => _searchQuery = ''),
+                    child: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 18),
+                  ),
               ],
             ),
           ),
           const SizedBox(height: 20),
 
-          const Text(
-            'Featured Academic Catalog',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Featured Academic Catalog',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              ),
+              if (_isLoadingCatalog)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
           ),
           const SizedBox(height: 12),
 
-          ..._books.map((book) {
-            final isAvailable = book.availableCopies > 0;
-            return Card(
-              margin: const EdgeInsets.only(bottom: 14),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          if (_isLoadingCatalog && _books.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 48),
+              child: Center(
+                child: Column(
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        book.coverUrl,
-                        width: 75,
-                        height: 105,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
+                    CircularProgressIndicator(),
+                    SizedBox(height: 12),
+                    Text('Loading live library catalog...', style: TextStyle(color: Color(0xFF64748B))),
+                  ],
+                ),
+              ),
+            )
+          else if (displayedBooks.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 48),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.search_off, size: 48, color: Color(0xFFCBD5E1)),
+                    SizedBox(height: 12),
+                    Text('No matching books found', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    SizedBox(height: 4),
+                    Text('Try adjusting your search criteria or check back later.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...displayedBooks.map((book) {
+              final isAvailable = book.availableCopies > 0;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 14),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          book.coverUrl,
                           width: 75,
                           height: 105,
-                          color: const Color(0xFFF1F5F9),
-                          child: const Icon(Icons.book, color: Color(0xFF94A3B8)),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            width: 75,
+                            height: 105,
+                            color: const Color(0xFFF1F5F9),
+                            child: const Icon(Icons.book, color: Color(0xFF94A3B8)),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
@@ -2782,7 +2832,23 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         ),
         const SizedBox(height: 12),
 
-        ..._loans.map((loan) {
+        if (_loans.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.menu_book, size: 48, color: Color(0xFFCBD5E1)),
+                  SizedBox(height: 10),
+                  Text('No active borrowed books', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  SizedBox(height: 4),
+                  Text('Books borrowed at the counter will appear here in real-time.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                ],
+              ),
+            ),
+          )
+        else
+          ..._loans.map((loan) {
           final isOverdue = loan.isOverdue;
           return Card(
             margin: const EdgeInsets.only(bottom: 14),
