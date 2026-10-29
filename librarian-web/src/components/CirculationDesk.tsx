@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import type { Loan, User, Reservation } from '../types';
-import { BookOpen, UserCheck, QrCode, CheckCircle2, AlertTriangle, Clock, ShieldCheck } from 'lucide-react';
+import { BookOpen, UserCheck, QrCode, CheckCircle2, AlertTriangle, Clock, ShieldCheck, RefreshCw, ArrowRight } from 'lucide-react';
 
 export const CirculationDesk: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'walkin' | 'pickup' | 'return'>('walkin');
@@ -17,6 +17,8 @@ export const CirculationDesk: React.FC = () => {
   const [reservation, setReservation] = useState<Reservation | null>(null);
   const [pickupCopyBarcode, setPickupCopyBarcode] = useState('');
   const [pickupLoanResult, setPickupLoanResult] = useState<Loan | null>(null);
+  const [reservationsList, setReservationsList] = useState<Reservation[]>([]);
+  const [isLoadingReservations, setIsLoadingReservations] = useState(false);
 
   // Return State
   const [returnBarcode, setReturnBarcode] = useState('');
@@ -26,6 +28,24 @@ export const CirculationDesk: React.FC = () => {
   // Shared status & errors
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const loadReservations = useCallback(async () => {
+    setIsLoadingReservations(true);
+    try {
+      const data = await api.getReservations();
+      setReservationsList(data);
+    } catch {
+      // fallback handled in api
+    } finally {
+      setIsLoadingReservations(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSubTab === 'pickup') {
+      loadReservations();
+    }
+  }, [activeSubTab, loadReservations]);
 
   // Handle Patron Lookup
   const handleLookupMember = async (e: React.FormEvent) => {
@@ -92,9 +112,20 @@ export const CirculationDesk: React.FC = () => {
       setSuccess(`Reservation fulfilled and issued to ${reservation.user?.name || 'Patron'}`);
       setReservation(null);
       setPickupCopyBarcode('');
+      loadReservations();
     } catch (err: any) {
       setError(err.message || 'Reservation fulfillment failed');
     }
+  };
+
+  // Select a reservation from the live list
+  const handleSelectReservationForPickup = (r: Reservation) => {
+    setReservation(r);
+    setReservationQuery(r.pickupCode || r.qrToken || r.id);
+    setPickupCopyBarcode(r.copy.barcode);
+    setError(null);
+    setSuccess(`Selected reservation for "${r.copy.book?.title || 'Book'}" - Scanned copy barcode pre-filled: ${r.copy.barcode}`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Handle Book Return
@@ -266,101 +297,220 @@ export const CirculationDesk: React.FC = () => {
 
       {/* ONLINE RESERVATION PICKUP (24H) */}
       {activeSubTab === 'pickup' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Clock size={20} color="var(--accent-primary)" />
-              Step 1: Scan Reservation QR / Code
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>
-              Enter the patron's 6-character Pickup Code or scan the QR from their mobile app.
-            </p>
-            <form onSubmit={handleLookupReservation} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-              <input
-                id="input-reservation-query"
-                type="text"
-                placeholder="e.g. RES-7492 or scan QR"
-                value={reservationQuery}
-                onChange={(e) => setReservationQuery(e.target.value)}
-                className="form-input"
-                style={{ flex: 1 }}
-              />
-              <button id="btn-lookup-reservation" type="submit" className="btn btn-secondary">
-                Search
-              </button>
-            </form>
-            <button
-              type="button"
-              onClick={() => setReservationQuery('RES-7492')}
-              className="btn btn-secondary"
-              style={{ fontSize: '0.75rem', padding: '4px 8px', marginBottom: '16px' }}
-            >
-              + Fill Active Demo Reservation (RES-7492)
-            </button>
-
-            {reservation && (
-              <div style={{ background: '#f8fafc', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <h4>{reservation.copy.book?.title}</h4>
-                  <span className="badge badge-reserved">{reservation.status}</span>
-                </div>
-                <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                  <div><strong>Reserved For:</strong> {reservation.user?.name} ({reservation.user?.registrationNumber})</div>
-                  <div><strong>Allocated Copy Barcode:</strong> <code style={{ color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px' }}>{reservation.copy.barcode}</code></div>
-                  <div><strong>Shelf Location:</strong> {reservation.copy.shelfLocation}</div>
-                  <div><strong>24h Expiry:</strong> {new Date(reservation.expiryDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({new Date(reservation.expiryDate).toLocaleDateString()})</div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <QrCode size={20} color="var(--accent-secondary)" />
-              Step 2: Verify Physical Copy & Confirm Issue
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>
-              Scan the physical barcode of the book in your hand to prevent issuing the wrong copy.
-            </p>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-              <input
-                id="input-pickup-copy-barcode"
-                type="text"
-                placeholder="Scan matching book barcode"
-                value={pickupCopyBarcode}
-                onChange={(e) => setPickupCopyBarcode(e.target.value)}
-                className="form-input"
-                style={{ flex: 1 }}
-              />
-              {reservation && (
-                <button
-                  type="button"
-                  onClick={() => setPickupCopyBarcode(reservation.copy.barcode)}
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                >
-                  + Match {reservation.copy.barcode}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+            <div className="glass-panel" style={{ padding: '24px' }}>
+              <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={20} color="var(--accent-primary)" />
+                Step 1: Scan Reservation QR / Code
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>
+                Enter the patron's 6-character Pickup Code or scan the QR from their mobile app.
+              </p>
+              <form onSubmit={handleLookupReservation} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <input
+                  id="input-reservation-query"
+                  type="text"
+                  placeholder="e.g. RES-7492 or scan QR"
+                  value={reservationQuery}
+                  onChange={(e) => setReservationQuery(e.target.value)}
+                  className="form-input"
+                  style={{ flex: 1 }}
+                />
+                <button id="btn-lookup-reservation" type="submit" className="btn btn-secondary">
+                  Search
                 </button>
+              </form>
+
+              {reservation && (
+                <div style={{ background: '#f8fafc', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h4 style={{ color: 'var(--text-primary)' }}>{reservation.copy.book?.title}</h4>
+                    <span className="badge badge-reserved">{reservation.status}</span>
+                  </div>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                    <div><strong>Reserved For:</strong> {reservation.user?.name} ({reservation.user?.registrationNumber})</div>
+                    <div><strong>Allocated Copy Barcode:</strong> <code style={{ color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px' }}>{reservation.copy.barcode}</code></div>
+                    <div><strong>Shelf Location:</strong> {reservation.copy.shelfLocation}</div>
+                    <div><strong>24h Expiry:</strong> {new Date(reservation.expiryDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({new Date(reservation.expiryDate).toLocaleDateString()})</div>
+                  </div>
+                </div>
               )}
             </div>
 
-            <button
-              id="btn-confirm-pickup-issue"
-              onClick={handleConfirmPickup}
-              disabled={!reservation || !pickupCopyBarcode}
-              className="btn btn-primary"
-              style={{ width: '100%', padding: '14px', fontSize: '1rem' }}
-            >
-              <CheckCircle2 size={20} />
-              Confirm Pickup & Issue Book
-            </button>
+            <div className="glass-panel" style={{ padding: '24px' }}>
+              <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <QrCode size={20} color="var(--accent-secondary)" />
+                Step 2: Verify Physical Copy & Confirm Issue
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>
+                Scan the physical barcode of the book in your hand to prevent issuing the wrong copy.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <input
+                  id="input-pickup-copy-barcode"
+                  type="text"
+                  placeholder="Scan matching book barcode"
+                  value={pickupCopyBarcode}
+                  onChange={(e) => setPickupCopyBarcode(e.target.value)}
+                  className="form-input"
+                  style={{ flex: 1 }}
+                />
+                {reservation && (
+                  <button
+                    type="button"
+                    onClick={() => setPickupCopyBarcode(reservation.copy.barcode)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                  >
+                    + Match {reservation.copy.barcode}
+                  </button>
+                )}
+              </div>
 
-            {pickupLoanResult && (
-              <div style={{ marginTop: '20px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
-                <h4 style={{ color: '#34d399', marginBottom: '8px' }}>✓ Reservation Successfully Fulfilled!</h4>
-                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                  <div>Patron now has an active loan until <strong>{new Date(pickupLoanResult.dueDate).toLocaleDateString()}</strong>.</div>
+              <button
+                id="btn-confirm-pickup-issue"
+                onClick={handleConfirmPickup}
+                disabled={!reservation || !pickupCopyBarcode}
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '14px', fontSize: '1rem' }}
+              >
+                <CheckCircle2 size={20} />
+                Confirm Pickup & Issue Book
+              </button>
+
+              {pickupLoanResult && (
+                <div style={{ marginTop: '20px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                  <h4 style={{ color: '#34d399', marginBottom: '8px' }}>✓ Reservation Successfully Fulfilled!</h4>
+                  <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    <div>Patron now has an active loan until <strong>{new Date(pickupLoanResult.dueDate).toLocaleDateString()}</strong>.</div>
+                  </div>
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Live Pending Reservations Queue from Backend */}
+          <div className="glass-panel" style={{ padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <Clock size={18} color="var(--accent-primary)" />
+                  Live Patron Reservations Awaiting Pickup
+                  <span className="badge badge-reserved" style={{ fontSize: '0.75rem', padding: '2px 8px' }}>
+                    {reservationsList.filter((r) => r.status === 'ACTIVE').length} Active
+                  </span>
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem', marginTop: '4px', margin: 0 }}>
+                  Reservations placed by patrons via Mobile App appear here in real-time.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadReservations}
+                disabled={isLoadingReservations}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8125rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RefreshCw size={14} style={{ animation: isLoadingReservations ? 'spin 1s linear infinite' : 'none' }} />
+                Refresh Queue
+              </button>
+            </div>
+
+            {reservationsList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                No active reservations currently waiting for pickup.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                      <th style={{ padding: '10px 12px' }}>Book Title</th>
+                      <th style={{ padding: '10px 12px' }}>Patron</th>
+                      <th style={{ padding: '10px 12px' }}>Pickup Code</th>
+                      <th style={{ padding: '10px 12px' }}>Copy Barcode</th>
+                      <th style={{ padding: '10px 12px' }}>24h Deadline</th>
+                      <th style={{ padding: '10px 12px' }}>Status</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reservationsList.map((r) => {
+                      const isExpired = new Date(r.expiryDate).getTime() < Date.now();
+                      return (
+                        <tr
+                          key={r.id}
+                          style={{
+                            borderBottom: '1px solid #f1f5f9',
+                            background: reservation?.id === r.id ? 'rgba(56, 189, 248, 0.08)' : 'transparent',
+                          }}
+                        >
+                          <td style={{ padding: '12px', fontWeight: 600 }}>
+                            {r.copy?.book?.title || 'Unknown Title'}
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>
+                              {r.copy?.book?.author}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <div>{r.user?.name || 'Patron'}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                              {r.user?.registrationNumber || r.user?.email}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                background: '#f0fdf4',
+                                color: '#166534',
+                                border: '1px solid #bbf7d0',
+                                borderRadius: '6px',
+                                fontWeight: 700,
+                                fontFamily: 'monospace',
+                                fontSize: '0.8125rem',
+                              }}
+                            >
+                              {r.pickupCode || 'PENDING'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', fontFamily: 'monospace' }}>
+                            {r.copy?.barcode || 'N/A'}
+                          </td>
+                          <td style={{ padding: '12px', fontSize: '0.8125rem', color: isExpired ? '#ef4444' : 'inherit' }}>
+                            {new Date(r.expiryDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({new Date(r.expiryDate).toLocaleDateString()})
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <span
+                              className={`badge ${
+                                r.status === 'ACTIVE'
+                                  ? 'badge-reserved'
+                                  : r.status === 'COLLECTED'
+                                    ? 'badge-available'
+                                    : 'badge-overdue'
+                              }`}
+                            >
+                              {r.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                            {r.status === 'ACTIVE' && (
+                              <button
+                                type="button"
+                                onClick={() => handleSelectReservationForPickup(r)}
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.75rem', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                Select Pickup <ArrowRight size={12} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { Scan, QrCode, Camera, CameraOff, Upload, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import jsQR from 'jsqr';
 
 export const ScannerTerminal: React.FC = () => {
   const [scanInput, setScanInput] = useState('');
@@ -42,7 +43,7 @@ export const ScannerTerminal: React.FC = () => {
       ]);
       setScanInput('');
 
-      // Optional sound beep on scan success
+      // Sound beep on scan success
       try {
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         const osc = audioCtx.createOscillator();
@@ -70,6 +71,8 @@ export const ScannerTerminal: React.FC = () => {
   // Start Camera
   const startCamera = async () => {
     setCameraError(null);
+    setIsCameraActive(true);
+
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
@@ -84,34 +87,80 @@ export const ScannerTerminal: React.FC = () => {
       });
 
       streamRef.current = stream;
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(() => {});
+        };
+        await videoRef.current.play().catch(() => {});
       }
-      setIsCameraActive(true);
 
-      // Start continuous scanner loop
+      // Continuous scanner loop with BarcodeDetector and fallback jsQR
+      let detector: any = null;
       if ('BarcodeDetector' in window) {
-        const detector = new (window as any).BarcodeDetector({
-          formats: ['qr_code', 'code_128', 'ean_13', 'upc_a', 'code_39'],
-        });
-
-        const interval = window.setInterval(async () => {
-          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-            try {
-              const barcodes = await detector.detect(videoRef.current);
-              if (barcodes.length > 0) {
-                const rawVal = barcodes[0].rawValue;
-                if (rawVal) {
-                  processScan(rawVal);
-                }
-              }
-            } catch {}
-          }
-        }, 250);
-
-        scanIntervalRef.current = interval;
+        try {
+          detector = new (window as any).BarcodeDetector({
+            formats: ['qr_code', 'code_128', 'ean_13', 'upc_a', 'code_39'],
+          });
+        } catch {}
       }
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      let lastScannedCode = '';
+      let lastScannedTime = 0;
+
+      const interval = window.setInterval(async () => {
+        const video = videoRef.current;
+        if (!video || video.readyState < 2) return;
+
+        const now = Date.now();
+
+        // 1. Hardware accelerated BarcodeDetector
+        if (detector) {
+          try {
+            const barcodes = await detector.detect(video);
+            if (barcodes.length > 0) {
+              const rawVal = barcodes[0].rawValue;
+              if (rawVal && (rawVal !== lastScannedCode || now - lastScannedTime > 2500)) {
+                lastScannedCode = rawVal;
+                lastScannedTime = now;
+                processScan(rawVal);
+                return;
+              }
+            }
+          } catch {}
+        }
+
+        // 2. jsQR universal frame decoder
+        if (ctx && video.videoWidth > 0 && video.videoHeight > 0) {
+          try {
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+            }
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const qrResult = jsQR(imageData.data, imageData.width, imageData.height, {
+              inversionAttempts: 'dontInvert',
+            });
+
+            if (qrResult && qrResult.data) {
+              const rawVal = qrResult.data.trim();
+              if (rawVal && (rawVal !== lastScannedCode || now - lastScannedTime > 2500)) {
+                lastScannedCode = rawVal;
+                lastScannedTime = now;
+                processScan(rawVal);
+              }
+            }
+          } catch {}
+        }
+      }, 200);
+
+      scanIntervalRef.current = interval;
     } catch (err: any) {
       setCameraError(err.message || 'Could not access web camera');
       setIsCameraActive(false);
@@ -146,26 +195,43 @@ export const ScannerTerminal: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if ('BarcodeDetector' in window) {
-      try {
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = async () => {
-          const detector = new (window as any).BarcodeDetector({
-            formats: ['qr_code', 'code_128', 'ean_13', 'upc_a'],
-          });
-          const barcodes = await detector.detect(img);
-          if (barcodes.length > 0) {
-            processScan(barcodes[0].rawValue);
-          } else {
-            setError('No readable QR code or barcode found in this image.');
+    try {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = async () => {
+        // First try native BarcodeDetector
+        if ('BarcodeDetector' in window) {
+          try {
+            const detector = new (window as any).BarcodeDetector({
+              formats: ['qr_code', 'code_128', 'ean_13', 'upc_a'],
+            });
+            const barcodes = await detector.detect(img);
+            if (barcodes.length > 0 && barcodes[0].rawValue) {
+              processScan(barcodes[0].rawValue);
+              return;
+            }
+          } catch {}
+        }
+
+        // Fallback to jsQR canvas decode
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const qrResult = jsQR(imageData.data, imageData.width, imageData.height);
+          if (qrResult && qrResult.data) {
+            processScan(qrResult.data);
+            return;
           }
-        };
-      } catch {
-        setError('Failed to analyze image file.');
-      }
-    } else {
-      setError('Native BarcodeDetector not available in this browser for file upload analysis.');
+        }
+
+        setError('No readable QR code or barcode found in this image.');
+      };
+    } catch {
+      setError('Failed to analyze image file.');
     }
   };
 
@@ -192,11 +258,9 @@ export const ScannerTerminal: React.FC = () => {
             <div style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Camera size={16} color="var(--accent-primary)" />
               Webcam Video Scanner
-              {hasBarcodeDetector && (
-                <span className="badge badge-available" style={{ fontSize: '0.65rem', padding: '2px 6px' }}>
-                  Hardware Accelerated
-                </span>
-              )}
+              <span className="badge badge-available" style={{ fontSize: '0.65rem', padding: '2px 6px' }}>
+                {hasBarcodeDetector ? 'Hardware BarcodeDetector + jsQR' : 'Universal jsQR Engine'}
+              </span>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               {isCameraActive && (
@@ -206,7 +270,7 @@ export const ScannerTerminal: React.FC = () => {
                     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
                     setFacingMode(nextMode);
                     stopCamera();
-                    setTimeout(() => startCamera(), 100);
+                    setTimeout(() => startCamera(), 150);
                   }}
                   className="btn btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '4px 8px' }}
@@ -234,28 +298,41 @@ export const ScannerTerminal: React.FC = () => {
             </div>
           </div>
 
-          {isCameraActive && (
-            <div style={{ position: 'relative', width: '100%', height: '240px', background: '#000', borderRadius: '8px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <video
-                ref={videoRef}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                playsInline
-                muted
-              />
-              {/* Animated Target Reticle */}
-              <div
-                style={{
-                  position: 'absolute',
-                  width: '160px',
-                  height: '160px',
-                  border: '2px solid #38bdf8',
-                  borderRadius: '12px',
-                  boxShadow: '0 0 15px rgba(56, 189, 248, 0.6)',
-                  pointerEvents: 'none',
-                }}
-              />
-            </div>
-          )}
+          {/* Persistent Video Element to avoid mounting unassigned stream */}
+          <div
+            style={{
+              position: 'relative',
+              width: '100%',
+              height: isCameraActive ? '260px' : '0px',
+              background: '#090d16',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              display: isCameraActive ? 'flex' : 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <video
+              ref={videoRef}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              playsInline
+              autoPlay
+              muted
+            />
+            {/* Animated Target Reticle */}
+            <div
+              style={{
+                position: 'absolute',
+                width: '160px',
+                height: '160px',
+                border: '2px solid #38bdf8',
+                borderRadius: '12px',
+                boxShadow: '0 0 15px rgba(56, 189, 248, 0.6)',
+                pointerEvents: 'none',
+              }}
+            />
+          </div>
 
           {cameraError && (
             <div style={{ marginTop: '10px', color: '#b91c1c', fontSize: '0.75rem' }}>

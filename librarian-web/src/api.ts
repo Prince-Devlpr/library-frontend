@@ -410,22 +410,26 @@ export const api = {
   // Issue Book (Walk-in Counter)
   async issueWalkIn(userId: string, barcode: string): Promise<Loan> {
     try {
-      const token = localStorage.getItem('lms_token');
       const res = await fetch(`${API_BASE_URL}/loans/issue`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ userId, barcode }),
       });
       if (res.ok) {
         const json = await res.json();
         return json.data;
       }
-    } catch {}
+      const errJson = await res.json().catch(() => null);
+      if (errJson?.error?.message) {
+        throw new Error(errJson.error.message);
+      }
+    } catch (e: any) {
+      if (e.message && !e.message.includes('fetch') && !e.message.includes('Network')) {
+        throw e;
+      }
+    }
 
-    // Memory simulation
+    // Memory simulation fallback
     const patron = mockPatrons.find((p) => p.id === userId);
     let targetCopy: BookCopy | null = null;
     let targetBook: Book | null = null;
@@ -461,6 +465,33 @@ export const api = {
 
   // Fulfill Reservation Pickup
   async fulfillReservation(pickupCode: string, barcode: string): Promise<Loan> {
+    try {
+      // 1. Resolve reservation details to obtain patron userId
+      const resolved = await this.resolveScan(pickupCode).catch(() => null);
+      const reservation = resolved?.entityType === 'RESERVATION' ? resolved.data : null;
+      const userId = reservation?.userId || reservation?.user?.id;
+
+      if (userId) {
+        const res = await fetch(`${API_BASE_URL}/loans/issue`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ userId, barcode }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          return json.data;
+        }
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.error?.message) {
+          throw new Error(errJson.error.message);
+        }
+      }
+    } catch (e: any) {
+      if (e.message && !e.message.includes('fetch') && !e.message.includes('Network')) {
+        throw e;
+      }
+    }
+
     const reservation = mockReservations.find(
       (r) => r.pickupCode === pickupCode || r.qrToken === pickupCode
     );
@@ -497,6 +528,26 @@ export const api = {
 
   // Return Book
   async returnBook(barcode: string) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/loans/return`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ barcode }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return json.data;
+      }
+      const errJson = await res.json().catch(() => null);
+      if (errJson?.error?.message) {
+        throw new Error(errJson.error.message);
+      }
+    } catch (e: any) {
+      if (e.message && !e.message.includes('fetch') && !e.message.includes('Network')) {
+        throw e;
+      }
+    }
+
     const loan = mockLoans.find((l) => l.copy.barcode === barcode && l.status !== 'RETURNED');
     if (!loan) throw new Error(`No active loan found for barcode: ${barcode}`);
 
@@ -574,6 +625,18 @@ export const api = {
   },
 
   async getReservations(): Promise<Reservation[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/reservations?limit=50`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const data = Array.isArray(json.data) ? json.data : (json.data?.reservations || []);
+        if (Array.isArray(data) && data.length > 0) {
+          return data;
+        }
+      }
+    } catch {}
     return mockReservations;
   },
 

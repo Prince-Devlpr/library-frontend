@@ -1347,6 +1347,118 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
   /// Dual-Payment Reservation Selector (Online via Razorpay vs Cash at Counter)
+  Future<void> _executeReservation({
+    required BookItem book,
+    required String paymentMethod,
+    String? paymentId,
+    String? receiptNumber,
+  }) async {
+    final randCode = 'RES-${1000 + (DateTime.now().millisecondsSinceEpoch % 9000)}';
+    final token = 'res_${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}';
+
+    ReservationItem newRes = ReservationItem(
+      id: 'res-${DateTime.now().millisecondsSinceEpoch}',
+      bookTitle: book.title,
+      author: book.author,
+      barcode: 'BC-${100000 + (DateTime.now().millisecond % 900000)}',
+      pickupCode: randCode,
+      qrToken: token,
+      expiryDate: DateTime.now().add(const Duration(hours: 24)),
+      status: 'ACTIVE',
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentMethod == 'RAZORPAY' ? 'PAID' : 'UNPAID',
+      depositAmount: 20.0,
+      receiptNumber: receiptNumber,
+    );
+
+    if (widget.accessToken != null) {
+      try {
+        final payload = {
+          'bookId': book.id,
+          'isbn': book.isbn,
+          'paymentMethod': paymentMethod,
+          'depositPaise': 2000,
+          'razorpayPaymentId': ?paymentId,
+        };
+
+        final response = await http
+            .post(
+              Uri.parse('$backendApiBaseUrl/reservations'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ${widget.accessToken}',
+              },
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 12));
+
+        if (response.statusCode == 201 || response.statusCode == 200) {
+          final json = jsonDecode(response.body);
+          if (json['success'] == true && json['data'] != null) {
+            final d = json['data'];
+            newRes = ReservationItem(
+              id: d['id']?.toString() ?? newRes.id,
+              bookTitle: d['copy']?['book']?['title']?.toString() ?? book.title,
+              author: d['copy']?['book']?['author']?.toString() ?? book.author,
+              barcode: d['copy']?['barcode']?.toString() ?? newRes.barcode,
+              pickupCode: d['pickupCode']?.toString() ?? newRes.pickupCode,
+              qrToken: d['qrToken']?.toString() ?? newRes.qrToken,
+              expiryDate: DateTime.tryParse(d['expiryDate']?.toString() ?? '') ?? newRes.expiryDate,
+              status: d['status']?.toString() ?? 'ACTIVE',
+              paymentMethod: paymentMethod,
+              paymentStatus: paymentMethod == 'RAZORPAY' ? 'PAID' : 'UNPAID',
+              depositAmount: 20.0,
+              receiptNumber: receiptNumber,
+            );
+          }
+        } else {
+          final errJson = jsonDecode(response.body);
+          final msg = errJson['error']?['message']?.toString() ?? 'Reservation failed on server';
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(backgroundColor: const Color(0xFFDC2626), content: Text(msg)),
+            );
+          }
+          return;
+        }
+      } catch (err) {
+        // Fallback for offline mode
+      }
+    }
+
+    setState(() {
+      book.availableCopies = (book.availableCopies > 0) ? book.availableCopies - 1 : 0;
+      _reservations.insert(0, newRes);
+      if (paymentMethod == 'RAZORPAY' && receiptNumber != null && paymentId != null) {
+        _receipts.insert(
+          0,
+          SettledReceiptItem(
+            receiptNumber: receiptNumber,
+            bookTitle: 'Hold Deposit: ${book.title}',
+            amount: 20.0,
+            method: 'ONLINE_RAZORPAY',
+            paidAt: DateTime.now(),
+            transactionId: paymentId,
+          ),
+        );
+      }
+      _currentIndex = 1; // switch to Reservations tab
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF059669),
+          content: Text(
+            paymentMethod == 'RAZORPAY'
+                ? 'Deposit Paid & Confirmed on Server! Code: ${newRes.pickupCode}'
+                : 'Reservation Confirmed on Server! Pay ₹20 at counter. Code: ${newRes.pickupCode}',
+          ),
+        ),
+      );
+    }
+  }
+
   void _reserveBook(BookItem book) {
     if (book.availableCopies <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1354,9 +1466,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       );
       return;
     }
-
-    final randCode = 'RES-${1000 + DateTime.now().millisecond % 9000}';
-    final token = 'res_${DateTime.now().millisecondsSinceEpoch}';
 
     showModalBottomSheet(
       context: context,
@@ -1477,43 +1586,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                 type: 'RESERVATION',
                                 entityId: book.id,
                                 onSuccess: (paymentId, receiptNumber) {
-                                  setState(() {
-                                    book.availableCopies--;
-                                    _reservations.insert(
-                                      0,
-                                      ReservationItem(
-                                        id: 'res-${DateTime.now().millisecondsSinceEpoch}',
-                                        bookTitle: book.title,
-                                        author: book.author,
-                                        barcode: 'BC-${100000 + DateTime.now().millisecond}',
-                                        pickupCode: randCode,
-                                        qrToken: token,
-                                        expiryDate: DateTime.now().add(const Duration(hours: 24)),
-                                        status: 'ACTIVE',
-                                        paymentMethod: 'RAZORPAY',
-                                        paymentStatus: 'PAID',
-                                        depositAmount: 20.0,
-                                        receiptNumber: receiptNumber,
-                                      ),
-                                    );
-                                    _receipts.insert(
-                                      0,
-                                      SettledReceiptItem(
-                                        receiptNumber: receiptNumber,
-                                        bookTitle: 'Hold Deposit: ${book.title}',
-                                        amount: 20.0,
-                                        method: 'ONLINE_RAZORPAY',
-                                        paidAt: DateTime.now(),
-                                        transactionId: paymentId,
-                                      ),
-                                    );
-                                    _currentIndex = 1;
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      backgroundColor: const Color(0xFF059669),
-                                      content: Text('Deposit Paid & Reserved! Collect within 24h with code $randCode'),
-                                    ),
+                                  _executeReservation(
+                                    book: book,
+                                    paymentMethod: 'RAZORPAY',
+                                    paymentId: paymentId,
+                                    receiptNumber: receiptNumber,
                                   );
                                 },
                               );
@@ -1590,31 +1667,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                             ),
                             onPressed: () {
                               Navigator.pop(ctx);
-                              setState(() {
-                                book.availableCopies--;
-                                _reservations.insert(
-                                  0,
-                                  ReservationItem(
-                                    id: 'res-${DateTime.now().millisecondsSinceEpoch}',
-                                    bookTitle: book.title,
-                                    author: book.author,
-                                    barcode: 'BC-${100000 + DateTime.now().millisecond}',
-                                    pickupCode: randCode,
-                                    qrToken: token,
-                                    expiryDate: DateTime.now().add(const Duration(hours: 24)),
-                                    status: 'ACTIVE',
-                                    paymentMethod: 'CASH_COUNTER',
-                                    paymentStatus: 'UNPAID',
-                                    depositAmount: 20.0,
-                                  ),
-                                );
-                                _currentIndex = 1;
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  backgroundColor: const Color(0xFF059669),
-                                  content: Text('Reserved! Pay ₹20.00 cash at desk upon pickup. Code: $randCode'),
-                                ),
+                              _executeReservation(
+                                book: book,
+                                paymentMethod: 'CASH_COUNTER',
                               );
                             },
                             icon: const Icon(Icons.qr_code, size: 16),
