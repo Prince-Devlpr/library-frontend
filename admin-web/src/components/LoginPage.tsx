@@ -9,7 +9,7 @@ interface LoginPageProps {
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [identifier, setIdentifier] = useState('admin@library.com');
-  const [password, setPassword] = useState('Admin@123');
+  const [password, setPassword] = useState('AdminPassword123!');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -282,7 +282,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <button
             id="demo-login-admin-quick"
             type="button"
-            onClick={() => handleQuickDemo('admin@library.com', 'Admin@123')}
+            onClick={() => handleQuickDemo('admin@library.com', 'AdminPassword123!')}
             style={{
               width: '100%',
               padding: '10px 14px',
@@ -298,7 +298,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           >
             <div>
               <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#0F172A' }}>System Administrator</div>
-              <div style={{ fontSize: '0.75rem', color: '#64748B' }}>admin@library.com • Admin@123</div>
+              <div style={{ fontSize: '0.75rem', color: '#64748B' }}>admin@library.com • AdminPassword123!</div>
             </div>
             <CheckCircle2 size={16} color="#2563EB" />
           </button>

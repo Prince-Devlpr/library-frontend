@@ -9,7 +9,7 @@ interface LoginPageProps {
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [identifier, setIdentifier] = useState('librarian@library.com');
-  const [password, setPassword] = useState('Librarian@123');
+  const [password, setPassword] = useState('LibrarianPassword123!');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -283,7 +283,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <button
               id="demo-login-librarian"
               type="button"
-              onClick={() => handleQuickDemo('librarian@library.com', 'Librarian@123')}
+              onClick={() => handleQuickDemo('librarian@library.com', 'LibrarianPassword123!')}
               style={{
                 padding: '10px 12px',
                 background: '#FFFFFF',
@@ -306,7 +306,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <button
               id="demo-login-admin"
               type="button"
-              onClick={() => handleQuickDemo('admin@library.com', 'Admin@123')}
+              onClick={() => handleQuickDemo('admin@library.com', 'AdminPassword123!')}
               style={{
                 padding: '10px 12px',
                 background: '#FFFFFF',

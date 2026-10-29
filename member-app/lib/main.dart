@@ -151,13 +151,15 @@ class LibraryMemberApp extends StatefulWidget {
   final String? initialMemberName;
   final String? initialMemberId;
   final String? initialMemberQrToken;
+  final String? initialAccessToken;
 
   const LibraryMemberApp({
     super.key,
-    this.startLoggedIn = true,
+    this.startLoggedIn = false,
     this.initialMemberName,
     this.initialMemberId,
     this.initialMemberQrToken,
+    this.initialAccessToken,
   });
 
   @override
@@ -169,6 +171,7 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
   String _memberName = 'Alex Rivera';
   String _memberId = 'MEM-2026-001';
   String _memberQrToken = 'mem_98a7c2b6f103e5a4';
+  String? _accessToken;
 
   @override
   void initState() {
@@ -177,19 +180,22 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
     if (widget.initialMemberName != null) _memberName = widget.initialMemberName!;
     if (widget.initialMemberId != null) _memberId = widget.initialMemberId!;
     if (widget.initialMemberQrToken != null) _memberQrToken = widget.initialMemberQrToken!;
+    _accessToken = widget.initialAccessToken;
   }
 
-  void _handleLoginSuccess(String name, String id, String qrToken) {
+  void _handleLoginSuccess(String name, String id, String qrToken, [String? token]) {
     setState(() {
       _memberName = name;
       _memberId = id;
       _memberQrToken = qrToken;
+      _accessToken = token;
       _isLoggedIn = true;
     });
   }
 
   void _handleLogout() {
     setState(() {
+      _accessToken = null;
       _isLoggedIn = false;
     });
   }
@@ -231,6 +237,7 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
               memberName: _memberName,
               memberId: _memberId,
               memberQrToken: _memberQrToken,
+              accessToken: _accessToken,
               onLogout: _handleLogout,
             )
           : MemberLoginScreen(
@@ -245,7 +252,7 @@ class _LibraryMemberAppState extends State<LibraryMemberApp> {
 // ---------------------------------------------------------
 
 class MemberLoginScreen extends StatefulWidget {
-  final Function(String name, String id, String qrToken) onLoginSuccess;
+  final Function(String name, String id, String qrToken, [String? token]) onLoginSuccess;
 
   const MemberLoginScreen({
     super.key,
@@ -258,7 +265,7 @@ class MemberLoginScreen extends StatefulWidget {
 
 class _MemberLoginScreenState extends State<MemberLoginScreen> {
   final TextEditingController _identifierController = TextEditingController(text: 'member@library.com');
-  final TextEditingController _passwordController = TextEditingController(text: 'Member@123');
+  final TextEditingController _passwordController = TextEditingController(text: 'UserPassword123!');
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;
@@ -296,17 +303,18 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
           'identifier': identifier,
           'password': password,
         }),
-      ).timeout(const Duration(seconds: 4));
+      ).timeout(const Duration(seconds: 15));
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         final json = jsonDecode(res.body);
         if (json['success'] == true && json['data'] != null) {
           final userData = json['data']['user'];
+          final accessToken = json['data']['accessToken']?.toString();
           final name = userData['name']?.toString() ?? 'Library Member';
-          final regNo = userData['registrationNumber']?.toString() ?? 'MEM-2026-001';
+          final regNo = userData['registrationNumber']?.toString() ?? identifier;
           final qrToken = userData['cardQrToken']?.toString() ?? 'mem_98a7c2b6f103e5a4';
 
-          widget.onLoginSuccess(name, regNo, qrToken);
+          widget.onLoginSuccess(name, regNo, qrToken, accessToken);
           return;
         }
       }
@@ -314,15 +322,23 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
       // Check specific error message from server
       try {
         final errJson = jsonDecode(res.body);
-        if (errJson['error']?['message'] != null) {
+        final msg = errJson['error']?['message']?.toString();
+        if (msg != null && msg.isNotEmpty) {
           setState(() {
-            _errorMessage = errJson['error']['message'];
+            _errorMessage = msg;
           });
           return;
         }
       } catch (_) {}
-    } catch (_) {
-      // Offline fallback: verify standard demo credentials
+
+      setState(() {
+        _errorMessage = 'Invalid credentials. Please verify your email/ID and password.';
+      });
+      return;
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Unable to connect to library server. You can tap "Offline Demo Mode" below to test offline.';
+      });
     } finally {
       if (mounted) {
         setState(() {
@@ -330,12 +346,14 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
         });
       }
     }
+  }
 
-    // Offline / Demo Fallback Mode
+  void _useOfflineDemo() {
+    final identifier = _identifierController.text.trim();
     if (identifier.toLowerCase().contains('alice') || identifier.contains('1001')) {
-      widget.onLoginSuccess('Alice Johnson', 'USR-1001', 'mem_alice_johnson_token');
+      widget.onLoginSuccess('Alice Johnson', 'USR-1001', 'mem_alice_johnson_token', null);
     } else {
-      widget.onLoginSuccess('Alex Rivera', 'MEM-2026-001', 'mem_98a7c2b6f103e5a4');
+      widget.onLoginSuccess('Alex Rivera', 'MEM-2026-001', 'mem_98a7c2b6f103e5a4', null);
     }
   }
 
@@ -563,7 +581,7 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
                                   backgroundColor: Colors.white,
                                 ),
                                 onPressed: () {
-                                  _prefillDemo('member@library.com', 'Member@123');
+                                  _prefillDemo('member@library.com', 'UserPassword123!');
                                   _handleLogin();
                                 },
                                 child: const Column(
@@ -584,7 +602,7 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
                                   backgroundColor: Colors.white,
                                 ),
                                 onPressed: () {
-                                  _prefillDemo('alice@library.com', 'Member@123');
+                                  _prefillDemo('alice@library.com', 'UserPassword123!');
                                   _handleLogin();
                                 },
                                 child: const Column(
@@ -596,6 +614,17 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 12),
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: _useOfflineDemo,
+                            icon: const Icon(Icons.offline_bolt_outlined, size: 16, color: Color(0xFF64748B)),
+                            label: const Text(
+                              'Test in Offline Demo Mode',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF64748B), decoration: TextDecoration.underline),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -618,6 +647,7 @@ class MainNavigationScreen extends StatefulWidget {
   final String memberName;
   final String memberId;
   final String memberQrToken;
+  final String? accessToken;
   final VoidCallback? onLogout;
 
   const MainNavigationScreen({
@@ -625,6 +655,7 @@ class MainNavigationScreen extends StatefulWidget {
     this.memberName = 'Alex Rivera',
     this.memberId = 'MEM-2026-001',
     this.memberQrToken = 'mem_98a7c2b6f103e5a4',
+    this.accessToken,
     this.onLogout,
   });
 
@@ -803,6 +834,80 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     memberQrToken = widget.memberQrToken;
     _books = List<BookItem>.from(_fallbackBooks);
     _fetchCatalog();
+    _fetchUserLoansAndReservations();
+  }
+
+  /// Fetches real user active loans and reservations from backend if authenticated
+  Future<void> _fetchUserLoansAndReservations() async {
+    if (widget.accessToken == null) return;
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ${widget.accessToken}',
+    };
+
+    // 1. Fetch user's live active loans from backend
+    try {
+      final loansRes = await http
+          .get(Uri.parse('$backendApiBaseUrl/loans/me'), headers: headers)
+          .timeout(const Duration(seconds: 8));
+      if (loansRes.statusCode == 200) {
+        final json = jsonDecode(loansRes.body);
+        if (json['success'] == true && json['data'] is List) {
+          final List list = json['data'];
+          if (mounted && list.isNotEmpty) {
+            setState(() {
+              _loans.clear();
+              for (final l in list) {
+                _loans.add(
+                  LoanItem(
+                    id: l['id']?.toString() ?? 'ln-${DateTime.now().millisecondsSinceEpoch}',
+                    bookTitle: l['copy']?['book']?['title']?.toString() ?? 'Library Book',
+                    author: l['copy']?['book']?['author']?.toString() ?? 'Author',
+                    barcode: l['copy']?['barcode']?.toString() ?? 'BC-100000',
+                    issueDate: DateTime.tryParse(l['issueDate']?.toString() ?? '') ?? DateTime.now(),
+                    dueDate: DateTime.tryParse(l['dueDate']?.toString() ?? '') ?? DateTime.now().add(const Duration(days: 14)),
+                    status: l['status']?.toString() ?? 'ACTIVE',
+                    fineAmount: (l['fine']?['amount'] as num?)?.toDouble() ?? 0.0,
+                  ),
+                );
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fetch user's live reservations from backend
+    try {
+      final resRes = await http
+          .get(Uri.parse('$backendApiBaseUrl/reservations'), headers: headers)
+          .timeout(const Duration(seconds: 8));
+      if (resRes.statusCode == 200) {
+        final json = jsonDecode(resRes.body);
+        if (json['success'] == true && json['data'] is List) {
+          final List list = json['data'];
+          if (mounted && list.isNotEmpty) {
+            setState(() {
+              _reservations.clear();
+              for (final r in list) {
+                _reservations.add(
+                  ReservationItem(
+                    id: r['id']?.toString() ?? 'res-${DateTime.now().millisecondsSinceEpoch}',
+                    bookTitle: r['copy']?['book']?['title']?.toString() ?? 'Reserved Book',
+                    author: r['copy']?['book']?['author']?.toString() ?? 'Author',
+                    barcode: r['copy']?['barcode']?.toString() ?? 'BC-100000',
+                    pickupCode: r['pickupCode']?.toString() ?? 'RES-7492',
+                    qrToken: r['qrToken']?.toString() ?? 'res_token',
+                    expiryDate: DateTime.tryParse(r['expiryDate']?.toString() ?? '') ?? DateTime.now().add(const Duration(hours: 24)),
+                    status: r['status']?.toString() ?? 'ACTIVE',
+                  ),
+                );
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   /// Fetches real book details from database API with fallback to offline data

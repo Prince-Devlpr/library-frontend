@@ -387,6 +387,23 @@ export const api = {
       if (copy) return { entityType: 'COPY', data: { ...copy, book: b } };
     }
 
+    // Cash voucher check
+    if (trimmed.includes('cash:') || trimmed.startsWith('CASH-')) {
+      const voucherCode = trimmed.includes('cash:') ? trimmed.split('cash:')[1] : trimmed;
+      const loanWithFine = mockLoans.find((l) => l.fine && l.fine.paymentStatus === 'UNPAID');
+      return {
+        entityType: 'CASH_VOUCHER',
+        data: {
+          voucherCode,
+          amount: loanWithFine?.fine?.amount || 25.0,
+          loanId: loanWithFine?.id || 'ln-demo',
+          patron: loanWithFine?.user || mockPatrons[0],
+          bookTitle: loanWithFine?.copy.book?.title || 'Clean Code',
+          status: 'PENDING',
+        },
+      };
+    }
+
     throw new Error('No entity matched the scanned code');
   },
 
